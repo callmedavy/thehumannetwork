@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { animate, motion, useMotionValue, useTransform } from "framer-motion";
-import { ArrowUp, Bookmark, Eye, MessageCircle, Share2 } from "lucide-react";
+import { ArrowUp, Bookmark, Check, Eye, MessageCircle, Share2 } from "lucide-react";
 import type { PostView, SwipeDirection } from "../types";
 import { communityHandle, compactNumber, postImage, publicPostUrl, relativeTime, titleGradient } from "../lib/format";
 import { useAppStore } from "../store/useAppStore";
@@ -16,9 +16,11 @@ interface SwipeCardProps {
 
 export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: SwipeCardProps) {
   const x = useMotionValue(0);
+  const y = useMotionValue(0);
   const rotate = useTransform(x, [-400, 0, 400], [-15, 0, 15]);
   const rightGlow = useTransform(x, [0, 180], [0, 0.8]);
   const leftGlow = useTransform(x, [-180, 0], [0.8, 0]);
+  const downGlow = useTransform(y, [0, 150], [0, 0.9]);
   const image = postImage(post);
   const savedIds = useAppStore((state) => state.savedIds);
   const toggleSaved = useAppStore((state) => state.toggleSaved);
@@ -32,14 +34,18 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
   function commit(direction: SwipeDirection) {
     if (committing.current) return;
     committing.current = true;
-    const animation = animate(x, direction === "right" ? window.innerWidth * 1.4 : -window.innerWidth * 1.4, { duration: 0.28, ease: [0.32, 0.72, 0, 1] });
+    const animation = direction === "down"
+      ? animate(y, window.innerHeight * 1.2, { duration: 0.28, ease: [0.32, 0.72, 0, 1] })
+      : animate(x, direction === "right" ? window.innerWidth * 1.4 : -window.innerWidth * 1.4, { duration: 0.28, ease: [0.32, 0.72, 0, 1] });
     animation.then(() => onSwipe(direction));
   }
 
-  function handleDragEnd(_: unknown, info: { offset: { x: number } }) {
+  function handleDragEnd(_: unknown, info: { offset: { x: number; y: number } }) {
     const horizontalThreshold = window.innerWidth * 0.35;
-    if (info.offset.x > horizontalThreshold) commit("right");
-    else if (info.offset.x < -horizontalThreshold) commit("left");
+    const verticalThreshold = Math.min(window.innerHeight * 0.2, 160);
+    if (info.offset.y > verticalThreshold && info.offset.y > Math.abs(info.offset.x)) commit("down");
+    else if (info.offset.x > horizontalThreshold && canVote) commit("right");
+    else if (info.offset.x < -horizontalThreshold && canVote) commit("left");
   }
 
   async function handleShare() {
@@ -67,8 +73,9 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
   return (
     <motion.article
       layout
-      style={{ x: active ? x : 0, y: translateY, rotate: active ? rotate : 0, scale }}
-      drag={active && canVote ? "x" : false}
+      style={{ x: active ? x : 0, y: active ? y : translateY, rotate: active ? rotate : 0, scale }}
+      drag={active}
+      dragDirectionLock
       dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
       dragElastic={0.95}
       onDragStart={() => { dragged.current = true; }}
@@ -80,13 +87,16 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
       animate={{ opacity: 1 }}
       initial={{ opacity: 0, scale: scale - 0.03, y: translateY + 18 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className={`absolute inset-0 overflow-hidden rounded-[1.75rem] border border-line bg-panel shadow-card ${active ? canVote ? "cursor-grab active:cursor-grabbing" : "cursor-pointer" : "pointer-events-none"}`}
-      aria-label={`${post.post.name}.${canVote ? " Swipe right to upvote or left to downvote." : " Open post for details."}`}
+      className={`absolute inset-0 overflow-hidden rounded-[1.75rem] border border-line bg-panel shadow-card ${active ? "cursor-grab active:cursor-grabbing" : "pointer-events-none"}`}
+      aria-label={`${post.post.name}. Swipe down to mark read.${canVote ? " Swipe right to upvote or left to downvote." : ""}`}
     >
       {active && (
         <>
           <motion.div style={{ opacity: rightGlow }} className="pointer-events-none absolute inset-0 z-30 rounded-[1.75rem] border-[3px] border-sprout shadow-[inset_0_0_80px_rgba(34,197,94,.28)]" />
           <motion.div style={{ opacity: leftGlow }} className="pointer-events-none absolute inset-0 z-30 rounded-[1.75rem] border-[3px] border-flare shadow-[inset_0_0_80px_rgba(239,68,68,.25)]" />
+          <motion.div style={{ opacity: downGlow }} className="pointer-events-none absolute inset-0 z-30 flex items-start justify-center rounded-[1.75rem] border-[3px] border-ink/70 bg-ink/10 pt-8 shadow-[inset_0_0_80px_rgb(var(--ink)/.2)]">
+            <span className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-extrabold uppercase tracking-[.16em] text-panel shadow-soft"><Check className="h-4 w-4" /> Mark read</span>
+          </motion.div>
         </>
       )}
 

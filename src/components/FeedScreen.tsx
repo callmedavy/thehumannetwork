@@ -17,11 +17,13 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   const savedIds = useAppStore((state) => state.savedIds);
   const toggleSaved = useAppStore((state) => state.toggleSaved);
   const syncSavedStatuses = useAppStore((state) => state.syncSavedStatuses);
+  const markPostRead = useAppStore((state) => state.markPostRead);
   const haptics = useAppStore((state) => state.haptics);
   const toast = useAppStore((state) => state.toast);
   const [queue, setQueue] = useState<PostView[]>([]);
   const [loading, setLoading] = useState(true);
   const [exhausted, setExhausted] = useState(false);
+  const [fetchRevision, setFetchRevision] = useState(0);
   const page = useRef(1);
   const fetching = useRef(false);
   const generation = useRef(0);
@@ -36,7 +38,9 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
       if (generation.current !== currentGeneration) return;
       if (token) syncSavedStatuses(posts);
       const unvotedPosts = token ? posts.filter((post) => !post.my_vote) : posts;
-      setQueue((current) => reset ? unvotedPosts : [...current, ...unvotedPosts.filter((post) => !current.some((item) => item.post.id === post.post.id))]);
+      const readPostIds = new Set(useAppStore.getState().readPostIds);
+      const unreadPosts = unvotedPosts.filter((post) => !readPostIds.has(post.post.id));
+      setQueue((current) => reset ? unreadPosts : [...current, ...unreadPosts.filter((post) => !current.some((item) => item.post.id === post.post.id))]);
       page.current = (reset ? 1 : page.current) + 1;
       setExhausted(posts.length === 0);
     } catch (error) {
@@ -45,6 +49,7 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
     } finally {
       fetching.current = false;
       setLoading(false);
+      setFetchRevision((revision) => revision + 1);
     }
   }, [instance, filters, token, toast, syncSavedStatuses]);
 
@@ -58,24 +63,30 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
 
   useEffect(() => {
     if (!loading && !exhausted && queue.length <= 8) fetchPage();
-  }, [queue.length, loading, exhausted, fetchPage]);
+  }, [queue.length, loading, exhausted, fetchPage, fetchRevision]);
 
   useEffect(() => {
-    if (votedPostId) setQueue((current) => current.filter((post) => post.post.id !== votedPostId));
-  }, [votedPostId]);
+    if (votedPostId) {
+      markPostRead(votedPostId);
+      setQueue((current) => current.filter((post) => post.post.id !== votedPostId));
+    }
+  }, [votedPostId, markPostRead]);
 
   async function finalizeSwipe(direction: SwipeDirection) {
-    const post = queue[0];
+    const post = queue.find((item) => item.post.id !== votedPostId);
     if (!post) return;
-    if (!token) {
+    if (direction !== "down" && !token) {
       toast("Sign in to vote.");
       return;
     }
-    setQueue((current) => current.slice(1));
+    markPostRead(post.post.id);
+    setQueue((current) => current.filter((item) => item.post.id !== post.post.id));
     if (haptics && "vibrate" in navigator) navigator.vibrate(10);
 
+    if (direction === "down") return;
+
     try {
-      await votePost(instance, post.post.id, direction === "right" ? 1 : -1, token);
+      await votePost(instance, post.post.id, direction === "right" ? 1 : -1, token!);
     } catch (error) {
       toast(error instanceof Error ? error.message : "Vote failed.", "error");
     }
@@ -105,8 +116,8 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
           )}
         </div>
         <div className="relative z-20 mt-5 shrink-0">
-          {current && <ActionRail onAction={finalizeSwipe} onSave={() => toggleSaved(current.post.id)} saved={savedIds.includes(current.post.id)} canVote={Boolean(token)} />}
-          <p className="mt-3 text-center text-[9px] font-bold uppercase tracking-[.18em] text-muted/70">Left downvotes · right upvotes</p>
+          {current && <ActionRail onAction={finalizeSwipe} onRead={() => finalizeSwipe("down")} onSave={() => toggleSaved(current.post.id)} saved={savedIds.includes(current.post.id)} canVote={Boolean(token)} />}
+          <p className="mt-3 text-center text-[9px] font-bold uppercase tracking-[.18em] text-muted/70">Down marks read · left downvotes · right upvotes</p>
         </div>
       </div>
     </main>
