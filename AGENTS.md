@@ -1,8 +1,8 @@
-# Swimmey Agent Guide
+# The Human Network Agent Guide
 
 ## Architecture
 
-Swimmey is a static React/Vite SPA deployed on Netlify. It has no application backend: the browser calls the selected Lemmy instance directly, and private client preferences remain in `localStorage`.
+The Human Network is a static React/Vite SPA deployed on Netlify. It has no application backend: the browser calls the selected Lemmy instance directly, and private client preferences remain in `localStorage`.
 
 ## Key Directories
 
