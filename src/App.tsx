@@ -18,6 +18,7 @@ const themeColors: Record<ThemePreference, string> = {
   pink: "#FF4FA3",
   blue: "#082A63",
   tan: "#D8C39A",
+  matrix: "#010803",
 };
 
 function applyTheme(preference: ThemePreference) {
@@ -43,7 +44,7 @@ export default function App() {
   if (!initialized) return <LoadingScreen label="Starting The Human Network" className="min-h-[100dvh] bg-canvas px-4" />;
 
   return (
-    <div className="grain min-h-[100dvh] bg-canvas text-ink">
+    <div className="app-shell grain min-h-[100dvh] bg-canvas text-ink">
       {!instance ? <LoginScreen /> : (
         <>
           {view === "feed" && <FeedScreen onOpenPost={setSelectedPost} votedPostId={votedPostId} />}

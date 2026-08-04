@@ -9,6 +9,7 @@ const themeOptions: Array<{ value: ThemePreference; label: string; description: 
   { value: "pink", label: "Hot pink", description: "Hot pink · black text", colors: ["#FF4FA3", "#160E12"] },
   { value: "blue", label: "Deep blue", description: "Deep blue · white text", colors: ["#082A63", "#F6F9FF"] },
   { value: "tan", label: "Warm tan", description: "Tan · dark red text", colors: ["#D8C39A", "#5B191E"] },
+  { value: "matrix", label: "The Matrix", description: "Code black · terminal green", colors: ["#010803", "#63FF75"] },
 ];
 
 export function UtilityView({ view }: { view: "profile" | "settings" | "about" }) {

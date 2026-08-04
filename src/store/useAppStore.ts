@@ -26,7 +26,7 @@ const initialFilters: Filters = {
 };
 
 const storedTheme = storage.get<string>("swimmey:theme", "forest");
-const initialTheme: ThemePreference = storedTheme === "pink" || storedTheme === "blue" || storedTheme === "tan" ? storedTheme : "forest";
+const initialTheme: ThemePreference = storedTheme === "pink" || storedTheme === "blue" || storedTheme === "tan" || storedTheme === "matrix" ? storedTheme : "forest";
 
 interface AppState {
   instance: string;
