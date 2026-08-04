@@ -68,6 +68,21 @@
   --selection: 248 224 176;
 }
 
+[data-theme="matrix"] {
+  color-scheme: dark;
+  --canvas: 1 8 3;
+  --ink: 99 255 117;
+  --panel: 3 24 9;
+  --muted: 91 184 101;
+  --line: 26 108 40;
+  --sprout: 157 255 164;
+  --flare: 96 255 107;
+  --wash-one: 0 255 70;
+  --wash-two: 0 116 34;
+  --shadow: 0 5 1;
+  --selection: 58 255 83;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -99,6 +114,18 @@ body {
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
   transition: background-color .25s ease, color .25s ease;
+}
+
+[data-theme="matrix"] body {
+  background-color: rgb(0 0 0);
+  background-image: url("/matrix-rain.svg");
+  background-position: center top;
+  background-repeat: repeat;
+  background-size: 85.333px 85.333px;
+}
+
+[data-theme="matrix"] .app-shell {
+  background-color: transparent;
 }
 
 button,
@@ -175,6 +202,10 @@ button {
 .markdown-body td { overflow-wrap: anywhere; }
 
 @media (prefers-reduced-motion: reduce) {
+  [data-theme="matrix"] body {
+    background-image: none;
+  }
+
   *,
   *::before,
   *::after {

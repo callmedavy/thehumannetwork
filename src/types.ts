@@ -1,4 +1,4 @@
-export type ThemePreference = "forest" | "pink" | "blue" | "tan";
+export type ThemePreference = "forest" | "pink" | "blue" | "tan" | "matrix";
 export type FeedScope = "All" | "Subscribed";
 export type SortOrder = "top" | "comments" | "contested";
 export type DateRange = "today" | "week" | "month" | "year" | "all";
