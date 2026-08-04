@@ -111,9 +111,9 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
         <span className="rounded-full bg-canvas px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-[.16em] text-muted">{post.community.title}</span>
       </header>
 
-      <div className="relative h-[59%] overflow-hidden bg-canvas">
+      <div className="relative h-[59%] overflow-hidden bg-black">
         {image ? (
-          <img src={image} alt="" draggable={false} className={`h-full w-full object-cover transition duration-500 ${post.post.nsfw && !nsfwVisible ? "scale-105 blur-2xl" : ""}`} />
+          <img src={image} alt="" draggable={false} className={`h-full w-full object-contain transition duration-500 ${post.post.nsfw && !nsfwVisible ? "blur-2xl" : ""}`} />
         ) : (
           <div className="flex h-full items-end p-6" style={{ background: titleGradient(post.post.name) }}>
             <p className="font-display text-[clamp(2rem,7vw,3.4rem)] leading-[.95] tracking-[-.04em] text-black/80">{post.post.name}</p>
