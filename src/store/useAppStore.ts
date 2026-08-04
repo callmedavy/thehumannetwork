@@ -28,12 +28,18 @@ const initialFilters: Filters = {
 const storedTheme = storage.get<string>("swimmey:theme", "forest");
 const initialTheme: ThemePreference = storedTheme === "pink" || storedTheme === "blue" || storedTheme === "tan" || storedTheme === "matrix" ? storedTheme : "forest";
 
+const readStorageKey = (instance: string) => `swimmey:read-posts:${instance}`;
+const storedReadPostIds = (instance: string) => storage
+  .get<unknown[]>(readStorageKey(instance), [])
+  .filter((postId): postId is number => typeof postId === "number" && Number.isInteger(postId));
+
 interface AppState {
   instance: string;
   token: string | null;
   browsing: boolean;
   initialized: boolean;
   savedIds: number[];
+  readPostIds: number[];
   filters: Filters;
   theme: ThemePreference;
   haptics: boolean;
@@ -49,6 +55,7 @@ interface AppState {
   removeSaved: (postId: number) => Promise<boolean>;
   setSavedIds: (postIds: number[]) => void;
   syncSavedStatuses: (posts: PostView[]) => void;
+  markPostRead: (postId: number) => void;
   setFilters: (filters: Filters) => void;
   setTheme: (theme: ThemePreference) => void;
   setHaptics: (enabled: boolean) => void;
@@ -65,6 +72,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   browsing: false,
   initialized: false,
   savedIds: [],
+  readPostIds: [],
   filters: initialFilters,
   theme: initialTheme,
   haptics: storage.get<boolean>("swimmey:haptics", true),
@@ -78,23 +86,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     const currentToken = isJwtCurrent(token) ? token : null;
     if (!currentToken) localStorage.removeItem("swimmey:jwt");
     localStorage.removeItem("swimmey:saved");
-    set({ instance, token: currentToken, browsing: Boolean(instance && !currentToken), initialized: true });
+    set({ instance, token: currentToken, browsing: Boolean(instance && !currentToken), readPostIds: storedReadPostIds(instance), initialized: true });
   },
   signIn: (instance, token) => {
     const normalized = normalizeInstance(instance);
     storage.set("swimmey:instance", normalized);
     storage.set("swimmey:jwt", token);
-    set({ instance: normalized, token, browsing: false, savedIds: [], view: "feed" });
+    set({ instance: normalized, token, browsing: false, savedIds: [], readPostIds: storedReadPostIds(normalized), view: "feed" });
   },
   browse: (instance) => {
     const normalized = normalizeInstance(instance || "lemmy.world");
     storage.set("swimmey:instance", normalized);
     localStorage.removeItem("swimmey:jwt");
-    set({ instance: normalized, token: null, browsing: true, savedIds: [], view: "feed" });
+    set({ instance: normalized, token: null, browsing: true, savedIds: [], readPostIds: storedReadPostIds(normalized), view: "feed" });
   },
   logout: () => {
     localStorage.removeItem("swimmey:jwt");
-    set({ token: null, browsing: false, instance: "", savedIds: [], view: "feed", menuOpen: false });
+    set({ token: null, browsing: false, instance: "", savedIds: [], readPostIds: [], view: "feed", menuOpen: false });
   },
   toggleSaved: async (postId) => {
     if (!get().token) {
@@ -133,6 +141,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     const savedIds = new Set(state.savedIds);
     posts.forEach((post) => { if (post.saved) savedIds.add(post.post.id); else savedIds.delete(post.post.id); });
     return { savedIds: Array.from(savedIds) };
+  }),
+  markPostRead: (postId) => set((state) => {
+    if (!state.instance || state.readPostIds.includes(postId)) return state;
+    const readPostIds = [postId, ...state.readPostIds].slice(0, 10000);
+    storage.set(readStorageKey(state.instance), readPostIds);
+    return { readPostIds };
   }),
   setFilters: (filters) => {
     storage.set("swimmey:filters", filters);
