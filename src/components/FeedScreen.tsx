@@ -14,8 +14,6 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   const filters = useAppStore((state) => state.filters);
   const setMenuOpen = useAppStore((state) => state.setMenuOpen);
   const setFilterOpen = useAppStore((state) => state.setFilterOpen);
-  const savedIds = useAppStore((state) => state.savedIds);
-  const toggleSaved = useAppStore((state) => state.toggleSaved);
   const syncSavedStatuses = useAppStore((state) => state.syncSavedStatuses);
   const markPostRead = useAppStore((state) => state.markPostRead);
   const haptics = useAppStore((state) => state.haptics);
@@ -116,7 +114,7 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
           )}
         </div>
         <div className="relative z-20 mt-5 shrink-0">
-          {current && <ActionRail onAction={finalizeSwipe} onRead={() => finalizeSwipe("down")} onSave={() => toggleSaved(current.post.id)} saved={savedIds.includes(current.post.id)} canVote={Boolean(token)} />}
+          {current && <ActionRail onAction={finalizeSwipe} onRead={() => finalizeSwipe("down")} canVote={Boolean(token)} />}
           <p className="mt-3 text-center text-[9px] font-bold uppercase tracking-[.18em] text-muted/70">Down marks read · left downvotes · right upvotes</p>
         </div>
       </div>
