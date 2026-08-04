@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PostView } from "./types";
+import type { PostView, ThemePreference } from "./types";
 import { useAppStore } from "./store/useAppStore";
 import { LoginScreen } from "./components/LoginScreen";
 import { FeedScreen } from "./components/FeedScreen";
@@ -13,10 +13,16 @@ import { ToastStack } from "./components/ToastStack";
 import { LoadingScreen } from "./components/LoadingScreen";
 import { NotificationsView } from "./components/NotificationsView";
 
-function applyTheme(preference: "light" | "dark" | "auto") {
-  const isDark = preference === "dark" || (preference === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.classList.toggle("dark", isDark);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", isDark ? "#051610" : "#081D15");
+const themeColors: Record<ThemePreference, string> = {
+  forest: "#081D15",
+  pink: "#FF4FA3",
+  blue: "#082A63",
+  tan: "#D8C39A",
+};
+
+function applyTheme(preference: ThemePreference) {
+  document.documentElement.dataset.theme = preference;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", themeColors[preference]);
 }
 
 export default function App() {
@@ -32,13 +38,9 @@ export default function App() {
 
   useEffect(() => {
     applyTheme(theme);
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const listener = () => { if (theme === "auto") applyTheme(theme); };
-    media.addEventListener("change", listener);
-    return () => media.removeEventListener("change", listener);
   }, [theme]);
 
-  if (!initialized) return <LoadingScreen label="Starting Swimmey" className="min-h-[100dvh] bg-canvas px-4" />;
+  if (!initialized) return <LoadingScreen label="Starting The Human Network" className="min-h-[100dvh] bg-canvas px-4" />;
 
   return (
     <div className="grain min-h-[100dvh] bg-canvas text-ink">

@@ -80,7 +80,7 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
       animate={{ opacity: 1 }}
       initial={{ opacity: 0, scale: scale - 0.03, y: translateY + 18 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className={`absolute inset-0 overflow-hidden rounded-[1.75rem] border border-white/70 bg-panel shadow-card dark:border-white/5 ${active ? canVote ? "cursor-grab active:cursor-grabbing" : "cursor-pointer" : "pointer-events-none"}`}
+      className={`absolute inset-0 overflow-hidden rounded-[1.75rem] border border-line bg-panel shadow-card ${active ? canVote ? "cursor-grab active:cursor-grabbing" : "cursor-pointer" : "pointer-events-none"}`}
       aria-label={`${post.post.name}.${canVote ? " Swipe right to upvote or left to downvote." : " Open post for details."}`}
     >
       {active && (

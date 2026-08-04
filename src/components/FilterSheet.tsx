@@ -5,7 +5,7 @@ import type { Filters } from "../types";
 import { useAppStore } from "../store/useAppStore";
 
 const orderOptions: Array<{ value: Filters["order"]; label: string }> = [
-  { value: "top", label: "Most upvoted" },
+  { value: "top", label: "Most upvotes" },
   { value: "comments", label: "Most commented" },
   { value: "contested", label: "Most contested" },
 ];

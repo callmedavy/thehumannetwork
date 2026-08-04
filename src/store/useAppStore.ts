@@ -22,8 +22,11 @@ const storedFilters = storage.get<Partial<Filters>>("swimmey:filters", {});
 const initialFilters: Filters = {
   scope: storedFilters.scope === "Subscribed" ? "Subscribed" : "All",
   order: storedFilters.order === "comments" || storedFilters.order === "contested" ? storedFilters.order : "top",
-  date: storedFilters.date === "today" || storedFilters.date === "week" || storedFilters.date === "month" || storedFilters.date === "year" ? storedFilters.date : "all",
+  date: storedFilters.date === "week" || storedFilters.date === "month" || storedFilters.date === "year" || storedFilters.date === "all" ? storedFilters.date : "today",
 };
+
+const storedTheme = storage.get<string>("swimmey:theme", "forest");
+const initialTheme: ThemePreference = storedTheme === "pink" || storedTheme === "blue" || storedTheme === "tan" ? storedTheme : "forest";
 
 interface AppState {
   instance: string;
@@ -63,7 +66,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   initialized: false,
   savedIds: [],
   filters: initialFilters,
-  theme: storage.get<ThemePreference>("swimmey:theme", "auto"),
+  theme: initialTheme,
   haptics: storage.get<boolean>("swimmey:haptics", true),
   view: "feed",
   menuOpen: false,

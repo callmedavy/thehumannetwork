@@ -11,15 +11,61 @@
   --panel: 13 42 30;
   --muted: 148 176 158;
   --line: 39 76 57;
+  --sprout: 120 184 137;
+  --flare: 212 124 112;
+  --wash-one: 104 163 125;
+  --wash-two: 144 167 103;
+  --shadow: 1 13 9;
+  --selection: 111 175 127;
 }
 
-.dark {
+[data-theme="forest"] {
   color-scheme: dark;
-  --canvas: 5 22 16;
-  --ink: 235 244 237;
-  --panel: 10 35 25;
-  --muted: 145 174 155;
-  --line: 34 70 51;
+}
+
+[data-theme="pink"] {
+  color-scheme: light;
+  --canvas: 255 79 163;
+  --ink: 22 14 18;
+  --panel: 255 111 179;
+  --muted: 91 35 62;
+  --line: 173 44 105;
+  --sprout: 18 74 50;
+  --flare: 121 20 57;
+  --wash-one: 255 205 228;
+  --wash-two: 125 23 70;
+  --shadow: 70 10 37;
+  --selection: 255 224 238;
+}
+
+[data-theme="blue"] {
+  color-scheme: dark;
+  --canvas: 8 42 99;
+  --ink: 246 249 255;
+  --panel: 13 57 126;
+  --muted: 178 199 232;
+  --line: 57 97 163;
+  --sprout: 112 215 190;
+  --flare: 255 151 139;
+  --wash-one: 75 142 225;
+  --wash-two: 72 221 204;
+  --shadow: 1 14 40;
+  --selection: 128 190 255;
+}
+
+[data-theme="tan"] {
+  color-scheme: light;
+  --canvas: 216 195 154;
+  --ink: 91 25 30;
+  --panel: 232 216 184;
+  --muted: 121 70 62;
+  --line: 166 129 104;
+  --sprout: 72 103 70;
+  --flare: 125 33 39;
+  --wash-one: 250 236 202;
+  --wash-two: 146 55 54;
+  --shadow: 79 47 35;
+  --selection: 248 224 176;
 }
 
 * {
@@ -45,13 +91,14 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   background:
-    radial-gradient(circle at 10% 0%, rgba(104, 163, 125, .14), transparent 28rem),
-    radial-gradient(circle at 100% 90%, rgba(144, 167, 103, .07), transparent 30rem),
+    radial-gradient(circle at 10% 0%, rgb(var(--wash-one) / .16), transparent 28rem),
+    radial-gradient(circle at 100% 90%, rgb(var(--wash-two) / .1), transparent 30rem),
     rgb(var(--canvas));
   color: rgb(var(--ink));
   font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
+  transition: background-color .25s ease, color .25s ease;
 }
 
 button,
@@ -65,7 +112,7 @@ button {
 }
 
 ::selection {
-  background: rgba(111, 175, 127, .32);
+  background: rgb(var(--selection) / .38);
 }
 
 .grain::after {
@@ -119,10 +166,10 @@ button {
 
 .markdown-body ul { list-style: disc; }
 .markdown-body ol { list-style: decimal; }
-.markdown-body a { color: #8bc99a; text-decoration: underline; }
+.markdown-body a { color: rgb(var(--sprout)); text-decoration: underline; }
 .markdown-body blockquote { border-left: 3px solid rgb(var(--line)); padding-left: 1rem; color: rgb(var(--muted)); }
 .markdown-body code { border-radius: .35rem; background: rgba(127, 127, 127, .12); padding: .12rem .35rem; font-size: .88em; }
-.markdown-body pre { overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 1rem; background: #03120d; color: #e7f2ea; padding: 1rem; }
+.markdown-body pre { overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 1rem; background: rgb(var(--ink)); color: rgb(var(--panel)); padding: 1rem; }
 .markdown-body table { width: 100%; table-layout: fixed; }
 .markdown-body th,
 .markdown-body td { overflow-wrap: anywhere; }
