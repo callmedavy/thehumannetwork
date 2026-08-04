@@ -133,8 +133,8 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
           {post.creator.avatar ? <img src={post.creator.avatar} alt="" className="h-full w-full object-cover" /> : post.creator.name.slice(0, 2)}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-extrabold">{communityHandle(post)}</p>
-          <p className="truncate text-[11px] text-muted">@{post.creator.name} · {relativeTime(post.post.published)}</p>
+          <p className="truncate text-xs font-extrabold">@{post.creator.name} · {relativeTime(post.post.published)}</p>
+          <p className="truncate text-[11px] text-muted">{communityHandle(post)}</p>
         </div>
         <span className="rounded-full bg-canvas px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-[.16em] text-muted">{post.community.title}</span>
       </header>
