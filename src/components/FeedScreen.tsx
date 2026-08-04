@@ -35,10 +35,12 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
       const posts = await listPosts(instance, filters, reset ? 1 : page.current, token);
       if (generation.current !== currentGeneration) return;
       if (token) syncSavedStatuses(posts);
-      const unvotedPosts = token ? posts.filter((post) => !post.my_vote) : posts;
       const readPostIds = new Set(useAppStore.getState().readPostIds);
-      const unreadPosts = unvotedPosts.filter((post) => !readPostIds.has(post.post.id));
-      setQueue((current) => reset ? unreadPosts : [...current, ...unreadPosts.filter((post) => !current.some((item) => item.post.id === post.post.id))]);
+      const unseenPosts = posts.filter((post) => {
+        const hasVote = token && post.my_vote !== null && post.my_vote !== undefined && post.my_vote !== 0;
+        return !hasVote && !post.read && !readPostIds.has(post.post.id);
+      });
+      setQueue((current) => reset ? unseenPosts : [...current, ...unseenPosts.filter((post) => !current.some((item) => item.post.id === post.post.id))]);
       page.current = (reset ? 1 : page.current) + 1;
       setExhausted(posts.length === 0);
     } catch (error) {

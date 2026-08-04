@@ -51,6 +51,7 @@ export interface PostView {
   creator: Person;
   community: Community;
   counts: Counts;
+  read?: boolean;
   saved?: boolean;
   my_vote?: number | null;
 }
