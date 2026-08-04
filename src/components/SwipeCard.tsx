@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { animate, motion, useMotionValue, useTransform } from "framer-motion";
-import { ArrowUp, Bookmark, Check, Eye, MessageCircle, Share2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Check, Eye, MessageCircle, Share2 } from "lucide-react";
 import type { PostView, SwipeDirection } from "../types";
 import { communityHandle, compactNumber, postImage, publicPostUrl, relativeTime, titleGradient } from "../lib/format";
 import { useAppStore } from "../store/useAppStore";
@@ -30,6 +30,22 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
   const dragged = useRef(false);
   const committing = useRef(false);
   const [nsfwVisible, setNsfwVisible] = useState(false);
+  const [dragDirection, setDragDirection] = useState<SwipeDirection | null>(null);
+
+  function handleDrag(offset: { x: number; y: number }) {
+    const activationDistance = 10;
+    if (Math.abs(offset.x) < activationDistance && Math.abs(offset.y) < activationDistance) {
+      setDragDirection(null);
+      return;
+    }
+
+    if (Math.abs(offset.y) > Math.abs(offset.x)) {
+      setDragDirection(offset.y > activationDistance ? "down" : null);
+      return;
+    }
+
+    setDragDirection(Math.abs(offset.x) >= activationDistance ? (offset.x > 0 ? "right" : "left") : null);
+  }
 
   function commit(direction: SwipeDirection) {
     if (committing.current) return;
@@ -79,8 +95,10 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
       dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
       dragElastic={0.95}
       onDragStart={() => { dragged.current = true; }}
+      onDrag={(_, info) => { handleDrag(info.offset); }}
       onDragEnd={(event, info) => {
         handleDragEnd(event, info);
+        setDragDirection(null);
         window.setTimeout(() => { dragged.current = false; }, 0);
       }}
       onClick={() => { if (!dragged.current && active) onOpen(); }}
@@ -92,10 +110,20 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
     >
       {active && (
         <>
-          <motion.div style={{ opacity: rightGlow }} className="pointer-events-none absolute inset-0 z-30 rounded-[1.75rem] border-[3px] border-sprout shadow-[inset_0_0_80px_rgba(34,197,94,.28)]" />
-          <motion.div style={{ opacity: leftGlow }} className="pointer-events-none absolute inset-0 z-30 rounded-[1.75rem] border-[3px] border-flare shadow-[inset_0_0_80px_rgba(239,68,68,.25)]" />
+          <motion.div style={{ opacity: rightGlow }} className="pointer-events-none absolute inset-0 z-30 rounded-[1.75rem] border-[3px] border-sprout shadow-[inset_0_0_80px_rgba(34,197,94,.28)]">
+            {canVote && dragDirection === "right" && (
+              <span className="absolute left-8 top-8 flex items-center gap-2 rounded-full bg-sprout px-4 py-2 text-xs font-extrabold uppercase tracking-[.16em] text-white shadow-soft"><ArrowUp className="h-4 w-4" /> Upvote</span>
+            )}
+          </motion.div>
+          <motion.div style={{ opacity: leftGlow }} className="pointer-events-none absolute inset-0 z-30 rounded-[1.75rem] border-[3px] border-flare shadow-[inset_0_0_80px_rgba(239,68,68,.25)]">
+            {canVote && dragDirection === "left" && (
+              <span className="absolute right-8 top-8 flex items-center gap-2 rounded-full bg-flare px-4 py-2 text-xs font-extrabold uppercase tracking-[.16em] text-white shadow-soft"><ArrowDown className="h-4 w-4" /> Downvote</span>
+            )}
+          </motion.div>
           <motion.div style={{ opacity: downGlow }} className="pointer-events-none absolute inset-0 z-30 flex items-start justify-center rounded-[1.75rem] border-[3px] border-ink/70 bg-ink/10 pt-8 shadow-[inset_0_0_80px_rgb(var(--ink)/.2)]">
-            <span className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-extrabold uppercase tracking-[.16em] text-panel shadow-soft"><Check className="h-4 w-4" /> Mark read</span>
+            {dragDirection === "down" && (
+              <span className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-extrabold uppercase tracking-[.16em] text-panel shadow-soft"><Check className="h-4 w-4" /> Mark read</span>
+            )}
           </motion.div>
         </>
       )}
