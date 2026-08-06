@@ -12,6 +12,7 @@ import { PostDetail } from "./components/PostDetail";
 import { ToastStack } from "./components/ToastStack";
 import { LoadingScreen } from "./components/LoadingScreen";
 import { NotificationsView } from "./components/NotificationsView";
+import { PublishPostView } from "./components/PublishPostView";
 
 const themeColors: Record<ThemePreference, string> = {
   forest: "#081D15",
@@ -48,6 +49,7 @@ export default function App() {
       {!instance ? <LoginScreen /> : (
         <>
           {view === "feed" && <FeedScreen onOpenPost={setSelectedPost} votedPostId={votedPostId} />}
+          {view === "publish" && <PublishPostView onPublished={setSelectedPost} />}
           {view === "notifications" && <NotificationsView onOpenPost={setSelectedPost} />}
           {view === "saved" && <SavedView onOpenPost={setSelectedPost} />}
           {view === "upvoted" && <VoteHistoryView vote="up" onOpenPost={setSelectedPost} />}

@@ -1,11 +1,12 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDown, ArrowUp, Bell, Bookmark, CircleUserRound, Home, Info, LogOut, MoonStar, Settings, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bell, Bookmark, CircleUserRound, Home, Info, LogOut, MoonStar, Settings, SquarePen, X } from "lucide-react";
 import type { ViewName } from "../types";
 import { BrandMark } from "./BrandMark";
 import { useAppStore } from "../store/useAppStore";
 
-const items: Array<{ view: ViewName; label: string; icon: typeof Home; requiresAuth?: boolean }> = [
+const items: Array<{ view: ViewName; label: string; icon: typeof Home; requiresAuth?: boolean; authMessage?: string }> = [
   { view: "feed", label: "Feed", icon: Home },
+  { view: "publish", label: "Publish post", icon: SquarePen, requiresAuth: true, authMessage: "Sign in to publish a post." },
   { view: "notifications", label: "Notifications", icon: Bell, requiresAuth: true },
   { view: "saved", label: "Saved", icon: Bookmark, requiresAuth: true },
   { view: "upvoted", label: "Upvoted", icon: ArrowUp, requiresAuth: true },
@@ -35,8 +36,8 @@ export function MenuDrawer() {
             <p className="mt-8 text-[10px] font-extrabold uppercase tracking-[.2em] text-muted">Connected to</p>
             <p className="mt-1 truncate text-sm font-extrabold uppercase tracking-[.12em]">{instance}</p>
             <nav className="hide-scrollbar mt-6 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
-              {items.map(({ view: itemView, label, icon: Icon, requiresAuth }) => (
-                <button key={itemView} type="button" onClick={() => { if (requiresAuth && !token) toast(itemView === "notifications" ? "Sign in to view your notifications." : itemView === "saved" ? "Sign in to view your saved posts." : "Sign in to view your voting history."); else setView(itemView); }} className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3.5 text-left text-sm font-bold transition ${view === itemView ? "bg-ink text-panel" : "text-muted hover:bg-canvas hover:text-ink"}`} aria-label={requiresAuth && !token ? `${label}, sign in required` : label}><Icon className="h-5 w-5" />{label}{requiresAuth && !token && <span className="ml-auto text-[9px] font-extrabold uppercase tracking-[.12em] opacity-60">Sign in</span>}</button>
+              {items.map(({ view: itemView, label, icon: Icon, requiresAuth, authMessage }) => (
+                <button key={itemView} type="button" onClick={() => { if (requiresAuth && !token) toast(authMessage || (itemView === "notifications" ? "Sign in to view your notifications." : itemView === "saved" ? "Sign in to view your saved posts." : "Sign in to view your voting history.")); else setView(itemView); }} className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3.5 text-left text-sm font-bold transition ${view === itemView ? "bg-ink text-panel" : "text-muted hover:bg-canvas hover:text-ink"}`} aria-label={requiresAuth && !token ? `${label}, sign in required` : label}><Icon className="h-5 w-5" />{label}{requiresAuth && !token && <span className="ml-auto text-[9px] font-extrabold uppercase tracking-[.12em] opacity-60">Sign in</span>}</button>
               ))}
             </nav>
             <div className="mt-4 shrink-0 rounded-2xl bg-canvas p-4">

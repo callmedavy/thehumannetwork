@@ -3,7 +3,7 @@ export type FeedScope = "All" | "Subscribed";
 export type SortOrder = "top" | "comments" | "contested";
 export type DateRange = "today" | "week" | "month" | "year" | "all";
 export type SwipeDirection = "left" | "right" | "down";
-export type ViewName = "feed" | "notifications" | "saved" | "upvoted" | "downvoted" | "profile" | "settings" | "about";
+export type ViewName = "feed" | "publish" | "notifications" | "saved" | "upvoted" | "downvoted" | "profile" | "settings" | "about";
 
 export interface Filters {
   scope: FeedScope;
