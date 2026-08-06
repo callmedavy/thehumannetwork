@@ -76,6 +76,46 @@ export async function listPosts(instance: string, filters: Filters, page: number
   return sortPosts(data.posts, filters);
 }
 
+export async function listPublishCommunities(instance: string, token: string) {
+  const communities = new Map<number, Community>();
+  let lastError: unknown;
+
+  for (const type of ["Subscribed", "Local"] as const) {
+    const params = new URLSearchParams({
+      type_: type,
+      sort: "Active",
+      page: "1",
+      limit: "50",
+      auth: token,
+    });
+
+    try {
+      const data = await request<{ communities: Array<{ community: Community }> }>(instance, `/community/list?${params}`, { token });
+      data.communities.forEach(({ community }) => communities.set(community.id, community));
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!communities.size && lastError) throw lastError;
+  return Array.from(communities.values()).sort((first, second) => first.title.localeCompare(second.title));
+}
+
+export async function createPost(instance: string, input: { name: string; communityId: number; body?: string; url?: string; nsfw: boolean }, token: string) {
+  return request<{ post_view: PostView }>(instance, "/post", {
+    method: "POST",
+    token,
+    body: JSON.stringify({
+      name: input.name,
+      community_id: input.communityId,
+      ...(input.body ? { body: input.body } : {}),
+      ...(input.url ? { url: input.url } : {}),
+      nsfw: input.nsfw,
+      auth: token,
+    }),
+  });
+}
+
 export async function listVotedPosts(instance: string, vote: "up" | "down", page: number, token: string) {
   const params = new URLSearchParams({
     type_: "All",
