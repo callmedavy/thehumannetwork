@@ -13,6 +13,16 @@ function getMessage(payload: unknown, fallback: string) {
   return fallback;
 }
 
+// Instances such as lemmy.world reject cross-origin browser calls, so requests go
+// through the same-origin Netlify proxy and only fall back to a direct call when
+// that proxy is not part of the deployment.
+const PROXY_MARKER = "x-lemmy-proxy";
+let proxyAvailable = true;
+
+function endpoint(instance: string, path: string, viaProxy: boolean) {
+  return viaProxy ? `/api/lemmy/${instance}/api/v3${path}` : `https://${instance}/api/v3${path}`;
+}
+
 async function request<T>(instance: string, path: string, options: RequestOptions = {}): Promise<T> {
   const { token, ...fetchOptions } = options;
   const headers = new Headers(fetchOptions.headers);
@@ -20,11 +30,25 @@ async function request<T>(instance: string, path: string, options: RequestOption
   if (fetchOptions.body) headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  let response: Response;
-  try {
-    response = await fetch(`https://${instance}/api/v3${path}`, { ...fetchOptions, headers });
-  } catch {
-    throw new Error(`Could not reach ${instance}. This instance may block browser requests; try another instance or add a Netlify proxy.`);
+  let response: Response | null = null;
+
+  if (proxyAvailable) {
+    try {
+      const proxied = await fetch(endpoint(instance, path, true), { ...fetchOptions, headers });
+      // Without the marker the request was answered by the SPA fallback, not the proxy.
+      if (proxied.headers.has(PROXY_MARKER)) response = proxied;
+      else proxyAvailable = false;
+    } catch {
+      response = null;
+    }
+  }
+
+  if (!response) {
+    try {
+      response = await fetch(endpoint(instance, path, false), { ...fetchOptions, headers });
+    } catch {
+      throw new Error(`Could not reach ${instance}. Check the instance address or try another instance.`);
+    }
   }
 
   const payload = await response.json().catch(() => null);
