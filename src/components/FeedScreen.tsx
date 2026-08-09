@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Menu, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
-import type { PostView, SwipeDirection } from "../types";
+import type { Community, PostView, SwipeDirection } from "../types";
 import { listPosts, votePost } from "../lib/lemmy";
+import { crossPostKey } from "../lib/format";
 import { useAppStore } from "../store/useAppStore";
 import { BrandMark } from "./BrandMark";
 import { SwipeCard } from "./SwipeCard";
@@ -12,6 +13,10 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   const instance = useAppStore((state) => state.instance);
   const token = useAppStore((state) => state.token);
   const filters = useAppStore((state) => state.filters);
+  const readFilterMode = useAppStore((state) => state.readFilterMode);
+  const sessionReady = useAppStore((state) => state.sessionReady);
+  const collapseCrossPosts = useAppStore((state) => state.collapseCrossPosts);
+  const localReadIds = useAppStore((state) => state.localReadIds);
   const setMenuOpen = useAppStore((state) => state.setMenuOpen);
   const setFilterOpen = useAppStore((state) => state.setFilterOpen);
   const syncSavedStatuses = useAppStore((state) => state.syncSavedStatuses);
@@ -19,68 +24,150 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   const haptics = useAppStore((state) => state.haptics);
   const toast = useAppStore((state) => state.toast);
   const [queue, setQueue] = useState<PostView[]>([]);
+  const [crossPosts, setCrossPosts] = useState<Record<number, Community[]>>({});
   const [loading, setLoading] = useState(true);
   const [exhausted, setExhausted] = useState(false);
   const [fetchRevision, setFetchRevision] = useState(0);
-  const page = useRef(1);
+  // Cursor pagination is the primary path; the page counter only serves pre-0.19 instances.
+  const cursor = useRef<string | null>(null);
+  const pageNumber = useRef(1);
+  // Every post id already appended this session, so a re-ranked page cannot append it twice.
+  const appendedIds = useRef(new Set<number>());
+  const crossPostOwners = useRef(new Map<string, number>());
   const fetching = useRef(false);
   const generation = useRef(0);
 
-  const fetchPage = useCallback(async (reset = false) => {
+  // A change to any of these makes the stored cursor meaningless, so the feed starts over.
+  const scopeKey = `${instance}|${token ? "account" : "guest"}|${filters.scope}|${filters.order}|${filters.date}|${readFilterMode}`;
+
+  // Render list and top-up trigger read from the same filtered queue: a post dismissed this
+  // session, or already read on the server, is never rendered and never counts as depth.
+  const visibleQueue = useMemo(
+    () => queue.filter((post) => !localReadIds.has(post.post.id) && post.post.id !== votedPostId && !(readFilterMode === "client" && post.read)),
+    [queue, localReadIds, votedPostId, readFilterMode],
+  );
+  const current = visibleQueue[0];
+
+  const resetFeed = useCallback(() => {
+    generation.current += 1;
+    cursor.current = null;
+    pageNumber.current = 1;
+    appendedIds.current = new Set<number>();
+    crossPostOwners.current = new Map<string, number>();
+    setQueue([]);
+    setCrossPosts({});
+    setExhausted(false);
+    setLoading(true);
+  }, []);
+
+  // The single point where posts enter feed state: dedupe, read filtering and optional
+  // cross-post collapsing all happen here so no component has to repeat them.
+  const ingestPosts = useCallback((incoming: PostView[]) => {
+    const dismissed = useAppStore.getState().localReadIds;
+    const fresh: PostView[] = [];
+    const groupedCommunities: Array<[number, Community]> = [];
+
+    incoming.forEach((post) => {
+      const postId = post.post.id;
+      if (appendedIds.current.has(postId)) return;
+      if (dismissed.has(postId)) return;
+      // In server mode the instance already omitted read posts; re-checking the flag here would
+      // be a second opinion on the same question.
+      if (readFilterMode === "client" && post.read) return;
+      const hasVote = Boolean(token) && post.my_vote !== null && post.my_vote !== undefined && post.my_vote !== 0;
+      if (hasVote) return;
+
+      if (collapseCrossPosts) {
+        const key = crossPostKey(post);
+        const ownerId = key ? crossPostOwners.current.get(key) : undefined;
+        if (key && ownerId !== undefined) {
+          appendedIds.current.add(postId);
+          groupedCommunities.push([ownerId, post.community]);
+          return;
+        }
+        if (key) crossPostOwners.current.set(key, postId);
+      }
+
+      appendedIds.current.add(postId);
+      fresh.push(post);
+    });
+
+    if (fresh.length) setQueue((current) => [...current, ...fresh]);
+    if (groupedCommunities.length) {
+      setCrossPosts((current) => {
+        const next = { ...current };
+        groupedCommunities.forEach(([ownerId, community]) => {
+          const existing = next[ownerId] ?? [];
+          if (!existing.some((item) => item.id === community.id)) next[ownerId] = [...existing, community];
+        });
+        return next;
+      });
+    }
+  }, [collapseCrossPosts, readFilterMode, token]);
+
+  const fetchPage = useCallback(async () => {
+    // One request at a time. A call that arrives while another is settling is not lost: the
+    // finally block bumps fetchRevision, which re-runs the effect below.
     if (fetching.current) return;
     fetching.current = true;
     const currentGeneration = generation.current;
-    if (reset) setLoading(true);
     try {
-      const posts = await listPosts(instance, filters, reset ? 1 : page.current, token);
+      const page = await listPosts(instance, filters, {
+        cursor: cursor.current,
+        page: pageNumber.current,
+        // Only one of the three read paths asks the server to filter.
+        showRead: readFilterMode === "server" ? false : readFilterMode === "session" ? true : undefined,
+      }, token);
+      // The scope changed while this request was in flight; its posts and cursor belong to a
+      // feed that no longer exists, so nothing here may reach feed state.
       if (generation.current !== currentGeneration) return;
-      if (token) syncSavedStatuses(posts);
-      const readPostIds = new Set(useAppStore.getState().readPostIds);
-      const unseenPosts = posts.filter((post) => {
-        const hasVote = token && post.my_vote !== null && post.my_vote !== undefined && post.my_vote !== 0;
-        return !hasVote && !post.read && !readPostIds.has(post.post.id);
-      });
-      setQueue((current) => reset ? unseenPosts : [...current, ...unseenPosts.filter((post) => !current.some((item) => item.post.id === post.post.id))]);
-      page.current = (reset ? 1 : page.current) + 1;
-      setExhausted(posts.length === 0);
+      if (token) syncSavedStatuses(page.posts);
+      cursor.current = page.nextCursor;
+      pageNumber.current += 1;
+      ingestPosts(page.posts);
+      setExhausted(page.posts.length === 0 || (page.cursorPagination && !page.nextCursor));
     } catch (error) {
+      if (generation.current !== currentGeneration) return;
       toast(error instanceof Error ? error.message : "Could not load the feed.", "error");
-      if (reset) setQueue([]);
+      setExhausted(true);
     } finally {
+      if (generation.current === currentGeneration) setLoading(false);
       fetching.current = false;
-      setLoading(false);
       setFetchRevision((revision) => revision + 1);
     }
-  }, [instance, filters, token, toast, syncSavedStatuses]);
+  }, [instance, filters, token, readFilterMode, toast, syncSavedStatuses, ingestPosts]);
 
   useEffect(() => {
-    generation.current += 1;
-    page.current = 1;
-    setQueue([]);
-    setExhausted(false);
-    fetchPage(true);
-  }, [instance, filters, token]);
+    if (!sessionReady) return;
+    resetFeed();
+  }, [scopeKey, sessionReady, resetFeed]);
+
+  // The only caller of fetchPage: the first page and every top-up go through here, so a single
+  // response can never be appended by two different paths.
+  useEffect(() => {
+    if (!sessionReady || exhausted || fetching.current || visibleQueue.length > 8) return;
+    void fetchPage();
+  }, [visibleQueue.length, exhausted, sessionReady, fetchPage, fetchRevision]);
 
   useEffect(() => {
-    if (!loading && !exhausted && queue.length <= 8) fetchPage();
-  }, [queue.length, loading, exhausted, fetchPage, fetchRevision]);
-
-  useEffect(() => {
-    if (votedPostId) {
-      markPostRead(votedPostId);
-      setQueue((current) => current.filter((post) => post.post.id !== votedPostId));
-    }
+    if (votedPostId) markPostRead(votedPostId);
   }, [votedPostId, markPostRead]);
 
+  function refresh() {
+    resetFeed();
+    setFetchRevision((revision) => revision + 1);
+  }
+
   async function finalizeSwipe(direction: SwipeDirection) {
-    const post = queue.find((item) => item.post.id !== votedPostId);
+    const post = current;
     if (!post) return;
     if (direction !== "down" && !token) {
       toast("Sign in to vote.");
       return;
     }
+    // Synchronous: the card is gone before mark_as_read leaves the browser.
     markPostRead(post.post.id);
-    setQueue((current) => current.filter((item) => item.post.id !== post.post.id));
+    setQueue((currentQueue) => currentQueue.filter((item) => item.post.id !== post.post.id));
     if (haptics && "vibrate" in navigator) navigator.vibrate(10);
 
     if (direction === "down") return;
@@ -91,9 +178,6 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
       toast(error instanceof Error ? error.message : "Vote failed.", "error");
     }
   }
-
-  const visibleQueue = votedPostId ? queue.filter((post) => post.post.id !== votedPostId) : queue;
-  const current = visibleQueue[0];
 
   return (
     <main className="relative flex h-[100dvh] flex-col overflow-hidden">
@@ -108,10 +192,10 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
       <div className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col overflow-hidden px-4 pb-5 pt-[5.8rem] safe-bottom">
         <div className="relative mx-auto min-h-0 w-full flex-1 max-w-[27rem]">
           {loading ? <LoadingScreen label="Loading feed" className="absolute inset-0" /> : current ? visibleQueue.slice(0, 3).map((post, index) => (
-            <SwipeCard key={post.post.id} post={post} depth={index} active={index === 0} canVote={Boolean(token)} onSwipe={finalizeSwipe} onOpen={() => onOpenPost(post)} />
+            <SwipeCard key={post.post.id} post={post} alsoPostedIn={crossPosts[post.post.id]} depth={index} active={index === 0} canVote={Boolean(token)} onSwipe={finalizeSwipe} onOpen={() => onOpenPost(post)} />
           )).reverse() : (
             <div className="absolute inset-0 grid place-items-center rounded-[1.75rem] border border-dashed border-line bg-panel/60 p-8 text-center">
-              <div><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-canvas"><Sparkles className="h-7 w-7 text-sprout" /></span><h2 className="mt-5 font-display text-3xl">You’re all caught up ✨</h2><p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-muted">You reached the edge of this feed. Refresh it, or tune your filters for a different corner of the fediverse.</p><button type="button" onClick={() => { page.current = 1; setExhausted(false); fetchPage(true); }} className="mx-auto mt-5 flex items-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-xs font-extrabold text-panel"><RotateCcw className="h-4 w-4" />Refresh feed</button></div>
+              <div><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-canvas"><Sparkles className="h-7 w-7 text-sprout" /></span><h2 className="mt-5 font-display text-3xl">You’re all caught up ✨</h2><p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-muted">You reached the edge of this feed. Refresh it, or tune your filters for a different corner of the fediverse.</p><button type="button" onClick={refresh} className="mx-auto mt-5 flex items-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-xs font-extrabold text-panel"><RotateCcw className="h-4 w-4" />Refresh feed</button></div>
             </div>
           )}
         </div>

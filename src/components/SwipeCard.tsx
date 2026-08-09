@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { animate, motion, useMotionValue, useTransform } from "framer-motion";
 import { ArrowDown, ArrowUp, Bookmark, Check, Eye, MessageCircle, Share2 } from "lucide-react";
-import type { PostView, SwipeDirection } from "../types";
+import type { Community, PostView, SwipeDirection } from "../types";
 import { communityHandle, compactNumber, postImage, publicPostUrl, relativeTime, titleGradient } from "../lib/format";
 import { useAppStore } from "../store/useAppStore";
 
@@ -10,11 +10,13 @@ interface SwipeCardProps {
   depth: number;
   active: boolean;
   canVote: boolean;
+  // Other communities carrying the same link, when cross-post collapsing is switched on.
+  alsoPostedIn?: Community[];
   onSwipe: (direction: SwipeDirection) => void;
   onOpen: () => void;
 }
 
-export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: SwipeCardProps) {
+export function SwipeCard({ post, depth, active, canVote, alsoPostedIn, onSwipe, onOpen }: SwipeCardProps) {
   const x = useMotionValue(0);
   const y = useMotionValue(0);
   const rotate = useTransform(x, [-400, 0, 400], [-15, 0, 15]);
@@ -85,6 +87,7 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
 
   const scale = 1 - depth * 0.035;
   const translateY = depth * 13;
+  const crossPostLabel = alsoPostedIn?.length ? `also posted in ${alsoPostedIn.map((community) => community.title).join(", ")}` : null;
 
   return (
     <motion.article
@@ -134,7 +137,7 @@ export function SwipeCard({ post, depth, active, canVote, onSwipe, onOpen }: Swi
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-extrabold">@{post.creator.name} · {relativeTime(post.post.published)}</p>
-          <p className="truncate text-[11px] text-muted">{communityHandle(post)}</p>
+          <p className="truncate text-[11px] text-muted" title={crossPostLabel ?? undefined}>{communityHandle(post)}{crossPostLabel ? ` · ${crossPostLabel}` : ""}</p>
         </div>
         <span className="rounded-full bg-canvas px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-[.16em] text-muted">{post.community.title}</span>
       </header>

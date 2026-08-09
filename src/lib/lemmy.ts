@@ -87,17 +87,93 @@ function sortPosts(posts: PostView[], filters: Filters) {
   });
 }
 
-export async function listPosts(instance: string, filters: Filters, page: number, token?: string | null) {
+// Lemmy 0.19 replaced numeric pagination with an opaque cursor; numeric pages re-rank
+// between requests on Active/Hot-style sorts and resurface posts the reader already saw.
+// Support is detected from the first response per instance host and kept for the session.
+const cursorSupport = new Map<string, boolean>();
+
+export interface PostPagination {
+  cursor?: string | null;
+  page?: number;
+  // undefined leaves the decision to the instance; false asks the server to omit read posts.
+  showRead?: boolean;
+}
+
+export interface PostPage {
+  posts: PostView[];
+  nextCursor: string | null;
+  cursorPagination: boolean;
+}
+
+export async function listPosts(instance: string, filters: Filters, pagination: PostPagination, token?: string | null): Promise<PostPage> {
+  const known = cursorSupport.get(instance);
+  const useCursor = Boolean(pagination.cursor) && known !== false;
   const params = new URLSearchParams({
     type_: filters.scope,
     sort: resolveSort(filters),
-    page: String(page),
     limit: "20",
   });
+  if (useCursor) params.set("page_cursor", pagination.cursor!);
+  else params.set("page", String(pagination.page ?? 1));
+  if (pagination.showRead !== undefined) params.set("show_read", String(pagination.showRead));
   // Older Lemmy v3 instances expect auth in the query as well as the bearer header.
   if (token) params.set("auth", token);
-  const data = await request<{ posts: PostView[] }>(instance, `/post/list?${params}`, { token });
-  return sortPosts(data.posts, filters);
+
+  const data = await request<{ posts: PostView[]; next_page?: string | null }>(instance, `/post/list?${params}`, { token });
+  const nextCursor = typeof data.next_page === "string" && data.next_page ? data.next_page : null;
+
+  if (nextCursor) cursorSupport.set(instance, true);
+  // Only the first page of a scope can prove the instance is pre-0.19; a later page without a
+  // cursor simply means the feed ended.
+  else if (known === undefined && !pagination.cursor) cursorSupport.set(instance, false);
+
+  return { posts: sortPosts(data.posts, filters), nextCursor, cursorPagination: cursorSupport.get(instance) === true };
+}
+
+export async function markPostRead(instance: string, postId: number, token: string) {
+  return request(instance, "/post/mark_as_read", {
+    method: "POST",
+    token,
+    // 0.19.4 renamed post_id to post_ids; sending both keeps every v3 instance happy.
+    body: JSON.stringify({ post_id: postId, post_ids: [postId], read: true, auth: token }),
+  });
+}
+
+export interface SiteSession {
+  version: string | null;
+  // Lemmy can mark every fetched post as read server-side; combined with show_read=false
+  // that empties each page as soon as it arrives.
+  autoMarkFetchedPostsAsRead: boolean;
+}
+
+function versionAtLeast(version: string | null, major: number, minor: number, patch: number) {
+  const match = version?.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return false;
+  const parts = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const target = [major, minor, patch];
+  for (let index = 0; index < 3; index += 1) {
+    if (parts[index] !== target[index]) return parts[index] > target[index];
+  }
+  return true;
+}
+
+// show_read landed with the 0.19.4 post filters; anything older ignores it silently, so the
+// client-side path has to take over rather than trust a parameter the server dropped.
+export function supportsServerReadFilter(version: string | null) {
+  return versionAtLeast(version, 0, 19, 4);
+}
+
+export async function getSiteSession(instance: string, token?: string | null): Promise<SiteSession> {
+  const params = new URLSearchParams();
+  if (token) params.set("auth", token);
+  const data = await request<{
+    version?: string;
+    my_user?: { local_user_view?: { local_user?: { auto_mark_fetched_posts_as_read?: boolean } } };
+  }>(instance, `/site?${params}`, { token });
+  return {
+    version: data.version ?? null,
+    autoMarkFetchedPostsAsRead: Boolean(data.my_user?.local_user_view?.local_user?.auto_mark_fetched_posts_as_read),
+  };
 }
 
 export async function listPublishCommunities(instance: string, token: string) {
@@ -146,6 +222,8 @@ export async function listVotedPosts(instance: string, vote: "up" | "down", page
     sort: "New",
     page: String(page),
     limit: "20",
+    // Voting history is a record, not a feed: read posts must stay visible here.
+    show_read: "true",
     auth: token,
   });
   params.set(vote === "up" ? "liked_only" : "disliked_only", "true");
@@ -160,6 +238,8 @@ export async function listSavedPosts(instance: string, page: number, token: stri
     page: String(page),
     limit: "50",
     saved_only: "true",
+    // Saved posts stay listed even once they are read.
+    show_read: "true",
     auth: token,
   });
   const data = await request<{ posts: PostView[] }>(instance, `/post/list?${params}`, { token });
