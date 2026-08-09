@@ -53,6 +53,24 @@ export function publicPostUrl(instance: string, post: PostView) {
   return post.post.ap_id || `https://${instance}/post/${post.post.id}`;
 }
 
+// The same link shared to several communities is a genuine cross-post, not a duplicate: each
+// copy has its own post id. This key groups those copies without touching read/dedupe logic.
+export function crossPostKey(post: PostView) {
+  const raw = post.post.url?.trim() || post.post.ap_id?.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    Array.from(url.searchParams.keys())
+      .filter((key) => /^(utm_|fbclid|gclid|igshid|mc_[ce]id|ref|si)$/i.test(key) || key.toLowerCase().startsWith("utm_"))
+      .forEach((key) => url.searchParams.delete(key));
+    const host = url.host.toLowerCase().replace(/^www\./, "");
+    const path = url.pathname.replace(/\/+$/, "");
+    return `${host}${path}${url.search}`.toLowerCase();
+  } catch {
+    return raw.toLowerCase();
+  }
+}
+
 export function titleGradient(title: string) {
   let hash = 0;
   for (let index = 0; index < title.length; index += 1) {
