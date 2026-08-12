@@ -1,7 +1,9 @@
 import { create } from "zustand";
-import type { Filters, PostView, ReadFilterMode, ThemePreference, ToastMessage, ViewName } from "../types";
+import type { Filters, PostView, ThemePreference, ToastMessage, ViewName } from "../types";
 import { isJwtCurrent, normalizeInstance } from "../lib/format";
-import { getSiteSession, markPostRead as markPostReadRequest, savePost, supportsServerReadFilter } from "../lib/lemmy";
+import { savePost } from "../lib/lemmy";
+import { configureReadTracking } from "../lib/readTracking";
+import { loadHideVotedPosts, saveHideVotedPosts } from "../lib/hideVotedFilter";
 
 const storage = {
   // Client preferences and the Lemmy session stay browser-local; account data remains on Lemmy.
@@ -28,31 +30,14 @@ const initialFilters: Filters = {
 const storedTheme = storage.get<string>("swimmey:theme", "forest");
 const initialTheme: ThemePreference = storedTheme === "pink" || storedTheme === "blue" || storedTheme === "tan" || storedTheme === "matrix" ? storedTheme : "forest";
 
-// Read state belongs to the Lemmy account, so nothing about it is written to the browser.
-// Earlier builds kept a per-instance read list; clear it out on the way past.
-function purgeLegacyReadHistory() {
-  try {
-    Object.keys(localStorage)
-      .filter((key) => key.startsWith("swimmey:read-posts:"))
-      .forEach((key) => localStorage.removeItem(key));
-  } catch {
-    // A locked-down storage sandbox simply means there is nothing to purge.
-  }
-}
-
 interface AppState {
   instance: string;
   token: string | null;
   browsing: boolean;
   initialized: boolean;
   savedIds: number[];
-  // Session scratch: ids the reader dismissed in this session. Hides the post the instant it is
-  // swiped so a feed fetch racing the mark_as_read write cannot bring it back.
-  localReadIds: Set<number>;
-  readFilterMode: ReadFilterMode;
-  autoMarkFetched: boolean;
-  sessionReady: boolean;
   collapseCrossPosts: boolean;
+  hideVotedPosts: boolean;
   filters: Filters;
   theme: ThemePreference;
   haptics: boolean;
@@ -61,7 +46,6 @@ interface AppState {
   filterOpen: boolean;
   toasts: ToastMessage[];
   hydrate: () => void;
-  loadSession: () => Promise<void>;
   signIn: (instance: string, token: string) => void;
   browse: (instance: string) => void;
   logout: () => void;
@@ -69,11 +53,11 @@ interface AppState {
   removeSaved: (postId: number) => Promise<boolean>;
   setSavedIds: (postIds: number[]) => void;
   syncSavedStatuses: (posts: PostView[]) => void;
-  markPostRead: (postId: number) => void;
   setFilters: (filters: Filters) => void;
   setTheme: (theme: ThemePreference) => void;
   setHaptics: (enabled: boolean) => void;
   setCollapseCrossPosts: (enabled: boolean) => void;
+  setHideVotedPosts: (enabled: boolean) => void;
   setView: (view: ViewName) => void;
   setMenuOpen: (open: boolean) => void;
   setFilterOpen: (open: boolean) => void;
@@ -87,11 +71,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   browsing: false,
   initialized: false,
   savedIds: [],
-  localReadIds: new Set<number>(),
-  readFilterMode: "client",
-  autoMarkFetched: false,
-  sessionReady: false,
   collapseCrossPosts: storage.get<boolean>("swimmey:collapse-crossposts", false),
+  hideVotedPosts: loadHideVotedPosts(),
   filters: initialFilters,
   theme: initialTheme,
   haptics: storage.get<boolean>("swimmey:haptics", true),
@@ -100,53 +81,33 @@ export const useAppStore = create<AppState>((set, get) => ({
   filterOpen: false,
   toasts: [],
   hydrate: () => {
-    purgeLegacyReadHistory();
     const instance = normalizeInstance(storage.get("swimmey:instance", ""));
     const token = storage.get<string | null>("swimmey:jwt", null);
     const currentToken = isJwtCurrent(token) ? token : null;
     if (!currentToken) localStorage.removeItem("swimmey:jwt");
     localStorage.removeItem("swimmey:saved");
+    configureReadTracking(instance, currentToken);
     set({ instance, token: currentToken, browsing: Boolean(instance && !currentToken), initialized: true });
-  },
-  loadSession: async () => {
-    const { instance, token } = get();
-    if (!instance) return;
-    try {
-      const session = await getSiteSession(instance, token);
-      // Auto-marking plus server-side read filtering makes every fetched page instantly read,
-      // which drains the feed while the reader is still looking at it.
-      const autoMarkFetched = Boolean(token) && session.autoMarkFetchedPostsAsRead;
-      if (autoMarkFetched) {
-        console.warn(
-          "[the-human-network] Your Lemmy account has auto_mark_fetched_posts_as_read enabled. Server-side read filtering is disabled to keep the feed from emptying itself; disable that account setting for the best swipe experience.",
-        );
-      }
-      const readFilterMode: ReadFilterMode = autoMarkFetched
-        ? "session"
-        : token && supportsServerReadFilter(session.version)
-          ? "server"
-          : "client";
-      set({ readFilterMode, autoMarkFetched, sessionReady: true });
-    } catch {
-      // Capability probing is best effort; the client-side path works everywhere.
-      set({ readFilterMode: "client", autoMarkFetched: false, sessionReady: true });
-    }
   },
   signIn: (instance, token) => {
     const normalized = normalizeInstance(instance);
     storage.set("swimmey:instance", normalized);
     storage.set("swimmey:jwt", token);
-    set({ instance: normalized, token, browsing: false, savedIds: [], localReadIds: new Set<number>(), readFilterMode: "client", autoMarkFetched: false, sessionReady: false, view: "feed" });
+    configureReadTracking(normalized, token);
+    set({ instance: normalized, token, browsing: false, savedIds: [], view: "feed" });
   },
   browse: (instance) => {
     const normalized = normalizeInstance(instance || "lemmy.world");
     storage.set("swimmey:instance", normalized);
     localStorage.removeItem("swimmey:jwt");
-    set({ instance: normalized, token: null, browsing: true, savedIds: [], localReadIds: new Set<number>(), readFilterMode: "client", autoMarkFetched: false, sessionReady: false, view: "feed" });
+    configureReadTracking(normalized, null);
+    set({ instance: normalized, token: null, browsing: true, savedIds: [], view: "feed" });
   },
   logout: () => {
     localStorage.removeItem("swimmey:jwt");
-    set({ token: null, browsing: false, instance: "", savedIds: [], localReadIds: new Set<number>(), readFilterMode: "client", autoMarkFetched: false, sessionReady: false, view: "feed", menuOpen: false });
+    // Flushes any queued read IDs with the outgoing credentials before they are dropped.
+    configureReadTracking("", null);
+    set({ token: null, browsing: false, instance: "", savedIds: [], view: "feed", menuOpen: false });
   },
   toggleSaved: async (postId) => {
     if (!get().token) {
@@ -186,17 +147,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     posts.forEach((post) => { if (post.saved) savedIds.add(post.post.id); else savedIds.delete(post.post.id); });
     return { savedIds: Array.from(savedIds) };
   }),
-  markPostRead: (postId) => {
-    const { localReadIds, instance, token } = get();
-    if (localReadIds.has(postId)) return;
-    // Hide first, write second. The next feed fetch can outrun mark_as_read, and the reader
-    // should never see a card they already dismissed come back mid-scroll.
-    set({ localReadIds: new Set(localReadIds).add(postId) });
-    if (!token) return;
-    void markPostReadRequest(instance, postId, token).catch((error) => {
-      console.warn(`[the-human-network] Could not mark post ${postId} as read on ${instance}.`, error);
-    });
-  },
   setFilters: (filters) => {
     storage.set("swimmey:filters", filters);
     set({ filters, filterOpen: false });
@@ -212,6 +162,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   setCollapseCrossPosts: (collapseCrossPosts) => {
     storage.set("swimmey:collapse-crossposts", collapseCrossPosts);
     set({ collapseCrossPosts });
+  },
+  setHideVotedPosts: (hideVotedPosts) => {
+    saveHideVotedPosts(hideVotedPosts);
+    set({ hideVotedPosts });
   },
   setView: (view) => set({ view, menuOpen: false }),
   setMenuOpen: (menuOpen) => set({ menuOpen }),

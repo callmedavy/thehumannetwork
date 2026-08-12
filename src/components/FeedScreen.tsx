@@ -3,6 +3,8 @@ import { Menu, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 import type { Community, PostView, SwipeDirection } from "../types";
 import { listPosts, votePost } from "../lib/lemmy";
 import { crossPostKey } from "../lib/format";
+import { flushPendingReads, queueMarkAsRead } from "../lib/readTracking";
+import { hasActiveVote } from "../lib/hideVotedFilter";
 import { useAppStore } from "../store/useAppStore";
 import { BrandMark } from "./BrandMark";
 import { SwipeCard } from "./SwipeCard";
@@ -13,14 +15,11 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   const instance = useAppStore((state) => state.instance);
   const token = useAppStore((state) => state.token);
   const filters = useAppStore((state) => state.filters);
-  const readFilterMode = useAppStore((state) => state.readFilterMode);
-  const sessionReady = useAppStore((state) => state.sessionReady);
   const collapseCrossPosts = useAppStore((state) => state.collapseCrossPosts);
-  const localReadIds = useAppStore((state) => state.localReadIds);
+  const hideVotedPosts = useAppStore((state) => state.hideVotedPosts);
   const setMenuOpen = useAppStore((state) => state.setMenuOpen);
   const setFilterOpen = useAppStore((state) => state.setFilterOpen);
   const syncSavedStatuses = useAppStore((state) => state.syncSavedStatuses);
-  const markPostRead = useAppStore((state) => state.markPostRead);
   const haptics = useAppStore((state) => state.haptics);
   const toast = useAppStore((state) => state.toast);
   const [queue, setQueue] = useState<PostView[]>([]);
@@ -38,13 +37,16 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   const generation = useRef(0);
 
   // A change to any of these makes the stored cursor meaningless, so the feed starts over.
-  const scopeKey = `${instance}|${token ? "account" : "guest"}|${filters.scope}|${filters.order}|${filters.date}|${readFilterMode}`;
+  const scopeKey = `${instance}|${token ? "account" : "guest"}|${filters.scope}|${filters.order}|${filters.date}`;
 
-  // Render list and top-up trigger read from the same filtered queue: a post dismissed this
-  // session, or already read on the server, is never rendered and never counts as depth.
+  // Render list and top-up trigger read from the same filtered queue. Two render-time filters
+  // only: the post just voted on from the detail sheet (optimistic hide while its read flush is
+  // in flight), and — when the preference is on — posts the account already voted on. The
+  // voted-posts filter is the codebase's one sanctioned client-side post filter (see
+  // lib/hideVotedFilter.ts); it stays at render time so switching it off restores the posts.
   const visibleQueue = useMemo(
-    () => queue.filter((post) => !localReadIds.has(post.post.id) && post.post.id !== votedPostId && !(readFilterMode === "client" && post.read)),
-    [queue, localReadIds, votedPostId, readFilterMode],
+    () => queue.filter((post) => post.post.id !== votedPostId && !(hideVotedPosts && token && hasActiveVote(post))),
+    [queue, votedPostId, hideVotedPosts, token],
   );
   const current = visibleQueue[0];
 
@@ -60,22 +62,15 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
     setLoading(true);
   }, []);
 
-  // The single point where posts enter feed state: dedupe, read filtering and optional
-  // cross-post collapsing all happen here so no component has to repeat them.
+  // The single point where posts enter feed state: dedupe and optional cross-post collapsing
+  // happen here so no component has to repeat them.
   const ingestPosts = useCallback((incoming: PostView[]) => {
-    const dismissed = useAppStore.getState().localReadIds;
     const fresh: PostView[] = [];
     const groupedCommunities: Array<[number, Community]> = [];
 
     incoming.forEach((post) => {
       const postId = post.post.id;
       if (appendedIds.current.has(postId)) return;
-      if (dismissed.has(postId)) return;
-      // In server mode the instance already omitted read posts; re-checking the flag here would
-      // be a second opinion on the same question.
-      if (readFilterMode === "client" && post.read) return;
-      const hasVote = Boolean(token) && post.my_vote !== null && post.my_vote !== undefined && post.my_vote !== 0;
-      if (hasVote) return;
 
       if (collapseCrossPosts) {
         const key = crossPostKey(post);
@@ -103,7 +98,7 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
         return next;
       });
     }
-  }, [collapseCrossPosts, readFilterMode, token]);
+  }, [collapseCrossPosts]);
 
   const fetchPage = useCallback(async () => {
     // One request at a time. A call that arrives while another is settling is not lost: the
@@ -115,8 +110,6 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
       const page = await listPosts(instance, filters, {
         cursor: cursor.current,
         page: pageNumber.current,
-        // Only one of the three read paths asks the server to filter.
-        showRead: readFilterMode === "server" ? false : readFilterMode === "session" ? true : undefined,
       }, token);
       // The scope changed while this request was in flight; its posts and cursor belong to a
       // feed that no longer exists, so nothing here may reach feed state.
@@ -135,23 +128,21 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
       fetching.current = false;
       setFetchRevision((revision) => revision + 1);
     }
-  }, [instance, filters, token, readFilterMode, toast, syncSavedStatuses, ingestPosts]);
+  }, [instance, filters, token, toast, syncSavedStatuses, ingestPosts]);
 
   useEffect(() => {
-    if (!sessionReady) return;
     resetFeed();
-  }, [scopeKey, sessionReady, resetFeed]);
+  }, [scopeKey, resetFeed]);
+
+  // Queued read IDs must not sit in the buffer when the reader leaves the feed.
+  useEffect(() => () => flushPendingReads(), []);
 
   // The only caller of fetchPage: the first page and every top-up go through here, so a single
   // response can never be appended by two different paths.
   useEffect(() => {
-    if (!sessionReady || exhausted || fetching.current || visibleQueue.length > 8) return;
+    if (exhausted || fetching.current || visibleQueue.length > 8) return;
     void fetchPage();
-  }, [visibleQueue.length, exhausted, sessionReady, fetchPage, fetchRevision]);
-
-  useEffect(() => {
-    if (votedPostId) markPostRead(votedPostId);
-  }, [votedPostId, markPostRead]);
+  }, [visibleQueue.length, exhausted, fetchPage, fetchRevision]);
 
   function refresh() {
     resetFeed();
@@ -161,19 +152,32 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   async function finalizeSwipe(direction: SwipeDirection) {
     const post = current;
     if (!post) return;
-    if (direction !== "down" && !token) {
+    // Anonymous readers cannot vote or mark-as-read on the account, but the down gesture and
+    // the center button still advance the stack locally — the card is dropped from the queue
+    // and no network call is made.
+    if (!token) {
+      if (direction === "down") {
+        setQueue((currentQueue) => currentQueue.filter((item) => item.post.id !== post.post.id));
+        if (haptics && "vibrate" in navigator) navigator.vibrate(10);
+        return;
+      }
       toast("Sign in to vote.");
       return;
     }
-    // Synchronous: the card is gone before mark_as_read leaves the browser.
-    markPostRead(post.post.id);
+    // Optimistic: the card is gone before any request leaves the browser.
     setQueue((currentQueue) => currentQueue.filter((item) => item.post.id !== post.post.id));
     if (haptics && "vibrate" in navigator) navigator.vibrate(10);
 
-    if (direction === "down") return;
+    if (direction === "down") {
+      queueMarkAsRead(post.post.id);
+      return;
+    }
 
     try {
-      await votePost(instance, post.post.id, direction === "right" ? 1 : -1, token!);
+      await votePost(instance, post.post.id, direction === "right" ? 1 : -1, token);
+      // A vote counts as intentional engagement, so it also marks the post read — but only
+      // once the vote actually landed.
+      queueMarkAsRead(post.post.id);
     } catch (error) {
       toast(error instanceof Error ? error.message : "Vote failed.", "error");
     }
@@ -192,7 +196,7 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
       <div className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col overflow-hidden px-4 pb-5 pt-[5.8rem] safe-bottom">
         <div className="relative mx-auto min-h-0 w-full flex-1 max-w-[27rem]">
           {loading ? <LoadingScreen label="Loading feed" className="absolute inset-0" /> : current ? visibleQueue.slice(0, 3).map((post, index) => (
-            <SwipeCard key={post.post.id} post={post} alsoPostedIn={crossPosts[post.post.id]} depth={index} active={index === 0} canVote={Boolean(token)} onSwipe={finalizeSwipe} onOpen={() => onOpenPost(post)} />
+            <SwipeCard key={post.post.id} post={post} alsoPostedIn={crossPosts[post.post.id]} depth={index} active={index === 0} canVote={Boolean(token)} canMarkRead={Boolean(token)} canAdvance={!token} onSwipe={finalizeSwipe} onOpen={() => onOpenPost(post)} />
           )).reverse() : (
             <div className="absolute inset-0 grid place-items-center rounded-[1.75rem] border border-dashed border-line bg-panel/60 p-8 text-center">
               <div><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-canvas"><Sparkles className="h-7 w-7 text-sprout" /></span><h2 className="mt-5 font-display text-3xl">You’re all caught up ✨</h2><p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-muted">You reached the edge of this feed. Refresh it, or tune your filters for a different corner of the fediverse.</p><button type="button" onClick={refresh} className="mx-auto mt-5 flex items-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-xs font-extrabold text-panel"><RotateCcw className="h-4 w-4" />Refresh feed</button></div>
@@ -200,8 +204,8 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
           )}
         </div>
         <div className="relative z-20 mt-5 shrink-0">
-          {current && <ActionRail onAction={finalizeSwipe} onRead={() => finalizeSwipe("down")} canVote={Boolean(token)} />}
-          <p className="mt-3 text-center text-[9px] font-bold uppercase tracking-[.18em] text-muted/70">Down marks read · left downvotes · right upvotes</p>
+          {current && <ActionRail onAction={finalizeSwipe} onRead={() => finalizeSwipe("down")} canVote={Boolean(token)} canMarkRead={Boolean(token)} canAdvance />}
+          <p className="mt-3 text-center text-[9px] font-bold uppercase tracking-[.18em] text-muted/70">{token ? "Down marks read · left downvotes · right upvotes" : "Swipe down or tap Next to skip · sign in to vote"}</p>
         </div>
       </div>
     </main>

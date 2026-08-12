@@ -1,11 +1,19 @@
 import type { CommentNode, CommentView, PostView } from "../types";
 
+// The instance field accepts what real users paste — bare hosts, `https://host`, or a full
+// URL to a community/post/user page. Everything after the host (`/c/tech`, `/post/123`, a
+// trailing slash, a `?query`, or a `#hash`) is dropped so the API base is always the host
+// root. Without this, requests concatenate to `https://host/c/tech/api/v3/post/list` and
+// the upstream returns 404 — the same 404 signed-out users see when they enter a URL
+// instead of a bare instance name.
 export function normalizeInstance(value: string) {
-  return value
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/+$/, "")
-    .toLowerCase();
+  const trimmed = value.trim().replace(/^https?:\/\//i, "").toLowerCase();
+  if (!trimmed) return "";
+  // First path/query/hash separator wins; the host is everything before it.
+  const boundary = trimmed.search(/[/?#]/);
+  const host = boundary === -1 ? trimmed : trimmed.slice(0, boundary);
+  // A stray port (`lemmy.example.com:8536`) is dropped; the proxy only speaks 443.
+  return host.replace(/:.*$/, "");
 }
 
 export function compactNumber(value: number) {

@@ -29,23 +29,14 @@ function applyTheme(preference: ThemePreference) {
 
 export default function App() {
   const hydrate = useAppStore((state) => state.hydrate);
-  const loadSession = useAppStore((state) => state.loadSession);
   const initialized = useAppStore((state) => state.initialized);
   const instance = useAppStore((state) => state.instance);
-  const token = useAppStore((state) => state.token);
   const theme = useAppStore((state) => state.theme);
   const view = useAppStore((state) => state.view);
   const [selectedPost, setSelectedPost] = useState<PostView | null>(null);
   const [votedPostId, setVotedPostId] = useState<number | null>(null);
 
   useEffect(() => hydrate(), [hydrate]);
-
-  // Read filtering depends on what this instance and account support, so probe once per session
-  // before the feed asks for its first page.
-  useEffect(() => {
-    if (!initialized || !instance) return;
-    void loadSession();
-  }, [initialized, instance, token, loadSession]);
 
   useEffect(() => {
     applyTheme(theme);
@@ -63,7 +54,7 @@ export default function App() {
           {view === "saved" && <SavedView onOpenPost={setSelectedPost} />}
           {view === "upvoted" && <VoteHistoryView vote="up" onOpenPost={setSelectedPost} />}
           {view === "downvoted" && <VoteHistoryView vote="down" onOpenPost={setSelectedPost} />}
-          {(view === "profile" || view === "settings" || view === "about") && <UtilityView view={view} />}
+          {(view === "profile" || view === "settings" || view === "about") && <UtilityView view={view} onOpenPost={setSelectedPost} />}
           <FilterSheet />
           <MenuDrawer />
           {selectedPost && <PostDetail post={selectedPost} onClose={() => setSelectedPost(null)} onPostVoted={setVotedPostId} />}

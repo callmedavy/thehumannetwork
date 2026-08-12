@@ -52,7 +52,15 @@ async function request<T>(instance: string, path: string, options: RequestOption
   }
 
   const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(getMessage(payload, `Request failed with status ${response.status}`));
+  if (!response.ok) {
+    // A 404 on `/api/v3/*` almost always means the entered host is not a Lemmy instance
+    // (Mastodon, Kbin/Mbin, a parked domain, or a typo). Say so instead of the generic
+    // "Request failed with status 404" — the toast is the reader's only clue.
+    const fallback = response.status === 404
+      ? `${instance} did not answer as a Lemmy instance (404). Check the address or try another instance.`
+      : `Request failed with status ${response.status}`;
+    throw new Error(getMessage(payload, fallback));
+  }
   return payload as T;
 }
 
@@ -95,8 +103,6 @@ const cursorSupport = new Map<string, boolean>();
 export interface PostPagination {
   cursor?: string | null;
   page?: number;
-  // undefined leaves the decision to the instance; false asks the server to omit read posts.
-  showRead?: boolean;
 }
 
 export interface PostPage {
@@ -104,6 +110,10 @@ export interface PostPage {
   nextCursor: string | null;
   cursorPagination: boolean;
 }
+
+// Read filtering is the server's job (show_read=false); if read posts still come back the
+// instance predates the 0.19.4 filter. Say so once instead of papering over it client-side.
+let warnedUnhonoredReadFilter = false;
 
 export async function listPosts(instance: string, filters: Filters, pagination: PostPagination, token?: string | null): Promise<PostPage> {
   const known = cursorSupport.get(instance);
@@ -113,9 +123,12 @@ export async function listPosts(instance: string, filters: Filters, pagination: 
     sort: resolveSort(filters),
     limit: "20",
   });
+  // `show_read` is a user-scoped override on Lemmy 0.19.x. Sending it without a JWT trips
+  // `not_logged_in` on most instances, so anonymous callers omit it entirely (they have no
+  // account-side read state to hide anyway).
+  if (token) params.set("show_read", "false");
   if (useCursor) params.set("page_cursor", pagination.cursor!);
   else params.set("page", String(pagination.page ?? 1));
-  if (pagination.showRead !== undefined) params.set("show_read", String(pagination.showRead));
   // Older Lemmy v3 instances expect auth in the query as well as the bearer header.
   if (token) params.set("auth", token);
 
@@ -127,53 +140,32 @@ export async function listPosts(instance: string, filters: Filters, pagination: 
   // cursor simply means the feed ended.
   else if (known === undefined && !pagination.cursor) cursorSupport.set(instance, false);
 
+  if (token && !warnedUnhonoredReadFilter && data.posts.some((post) => post.read)) {
+    warnedUnhonoredReadFilter = true;
+    console.warn(
+      `[the-human-network] ${instance} returned read posts despite show_read=false; the instance likely predates Lemmy 0.19.4, so read posts stay visible in the feed.`,
+    );
+  }
+
   return { posts: sortPosts(data.posts, filters), nextCursor, cursorPagination: cursorSupport.get(instance) === true };
 }
 
-export async function markPostRead(instance: string, postId: number, token: string) {
+/**
+ * Marks a batch of posts as read on the account's home instance (Lemmy 0.19.4+,
+ * `POST /api/v3/post/mark_as_read`). Callers must batch IDs — this is the only transport
+ * for read marking and it never sends one request per post.
+ *
+ * `keepalive` lets the browser finish the request during page unload; it is why this call,
+ * unlike the rest of the transport, must keep its body under the keepalive 64 KiB budget
+ * (a 20-ID batch is far below it).
+ */
+export async function markPostsRead(instance: string, postIds: number[], token: string, options: { keepalive?: boolean } = {}) {
   return request(instance, "/post/mark_as_read", {
     method: "POST",
     token,
-    // 0.19.4 renamed post_id to post_ids; sending both keeps every v3 instance happy.
-    body: JSON.stringify({ post_id: postId, post_ids: [postId], read: true, auth: token }),
+    keepalive: options.keepalive,
+    body: JSON.stringify({ post_ids: postIds, read: true }),
   });
-}
-
-export interface SiteSession {
-  version: string | null;
-  // Lemmy can mark every fetched post as read server-side; combined with show_read=false
-  // that empties each page as soon as it arrives.
-  autoMarkFetchedPostsAsRead: boolean;
-}
-
-function versionAtLeast(version: string | null, major: number, minor: number, patch: number) {
-  const match = version?.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return false;
-  const parts = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const target = [major, minor, patch];
-  for (let index = 0; index < 3; index += 1) {
-    if (parts[index] !== target[index]) return parts[index] > target[index];
-  }
-  return true;
-}
-
-// show_read landed with the 0.19.4 post filters; anything older ignores it silently, so the
-// client-side path has to take over rather than trust a parameter the server dropped.
-export function supportsServerReadFilter(version: string | null) {
-  return versionAtLeast(version, 0, 19, 4);
-}
-
-export async function getSiteSession(instance: string, token?: string | null): Promise<SiteSession> {
-  const params = new URLSearchParams();
-  if (token) params.set("auth", token);
-  const data = await request<{
-    version?: string;
-    my_user?: { local_user_view?: { local_user?: { auto_mark_fetched_posts_as_read?: boolean } } };
-  }>(instance, `/site?${params}`, { token });
-  return {
-    version: data.version ?? null,
-    autoMarkFetchedPostsAsRead: Boolean(data.my_user?.local_user_view?.local_user?.auto_mark_fetched_posts_as_read),
-  };
 }
 
 export async function listPublishCommunities(instance: string, token: string) {
@@ -243,6 +235,26 @@ export async function listSavedPosts(instance: string, page: number, token: stri
     auth: token,
   });
   const data = await request<{ posts: PostView[] }>(instance, `/post/list?${params}`, { token });
+  return data.posts;
+}
+
+export const USER_POSTS_PAGE_SIZE = 20;
+
+/**
+ * Lists posts authored by one person, newest first (`GET /api/v3/user`). The endpoint returns the
+ * person's posts and comments together; only the posts are kept here. `saved_only=false` is sent
+ * explicitly because some instances default it to the requester's account preference.
+ */
+export async function listUserPosts(instance: string, personId: number, page: number, token?: string | null) {
+  const params = new URLSearchParams({
+    person_id: String(personId),
+    sort: "New",
+    page: String(page),
+    limit: String(USER_POSTS_PAGE_SIZE),
+    saved_only: "false",
+  });
+  if (token) params.set("auth", token);
+  const data = await request<{ posts: PostView[] }>(instance, `/user?${params}`, { token });
   return data.posts;
 }
 
@@ -372,7 +384,7 @@ export async function voteComment(instance: string, commentId: number, score: -1
 export async function getProfile(instance: string, token: string) {
   const params = new URLSearchParams({ auth: token });
   const data = await request<{
-    my_user?: { local_user_view?: { person: { name: string; display_name?: string; avatar?: string }; local_user: { email?: string } } };
+    my_user?: { local_user_view?: { person: { id: number; name: string; display_name?: string; avatar?: string }; local_user: { email?: string } } };
   }>(instance, `/site?${params}`, { token });
   return data.my_user?.local_user_view;
 }

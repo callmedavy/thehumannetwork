@@ -3,11 +3,6 @@ export type FeedScope = "All" | "Subscribed";
 export type SortOrder = "top" | "comments" | "contested";
 export type DateRange = "today" | "week" | "month" | "year" | "all";
 export type SwipeDirection = "left" | "right" | "down";
-// Exactly one read-filtering path runs at a time:
-// server  – the instance omits read posts (show_read=false)
-// client  – the app drops post_views whose read flag is true
-// session – the account auto-marks fetched posts, so only this session's dismissals are hidden
-export type ReadFilterMode = "server" | "client" | "session";
 export type ViewName = "feed" | "publish" | "notifications" | "saved" | "upvoted" | "downvoted" | "profile" | "settings" | "about";
 
 export interface Filters {

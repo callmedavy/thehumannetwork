@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import type { CommentNode, CommentView, PostView } from "../types";
 import { buildCommentTree, compactNumber, communityHandle, postImage, relativeTime } from "../lib/format";
 import { createComment, listComments, voteComment, votePost } from "../lib/lemmy";
+import { queueMarkAsRead } from "../lib/readTracking";
 import { useAppStore } from "../store/useAppStore";
 import { LoadingScreen } from "./LoadingScreen";
 
@@ -101,6 +102,8 @@ export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | nu
     onClose();
     try {
       await votePost(instance, postId, score, token);
+      // A vote is intentional engagement: it also marks the post read, once the vote landed.
+      queueMarkAsRead(postId);
       toast(score === 1 ? "Upvoted." : "Downvoted.", "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Vote failed.", "error");
