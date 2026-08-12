@@ -228,6 +228,26 @@ export async function listSavedPosts(instance: string, page: number, token: stri
   return data.posts;
 }
 
+export const USER_POSTS_PAGE_SIZE = 20;
+
+/**
+ * Lists posts authored by one person, newest first (`GET /api/v3/user`). The endpoint returns the
+ * person's posts and comments together; only the posts are kept here. `saved_only=false` is sent
+ * explicitly because some instances default it to the requester's account preference.
+ */
+export async function listUserPosts(instance: string, personId: number, page: number, token?: string | null) {
+  const params = new URLSearchParams({
+    person_id: String(personId),
+    sort: "New",
+    page: String(page),
+    limit: String(USER_POSTS_PAGE_SIZE),
+    saved_only: "false",
+  });
+  if (token) params.set("auth", token);
+  const data = await request<{ posts: PostView[] }>(instance, `/user?${params}`, { token });
+  return data.posts;
+}
+
 export async function getPost(instance: string, postId: number, token?: string | null) {
   const params = new URLSearchParams({ id: String(postId) });
   if (token) params.set("auth", token);
@@ -354,7 +374,7 @@ export async function voteComment(instance: string, commentId: number, score: -1
 export async function getProfile(instance: string, token: string) {
   const params = new URLSearchParams({ auth: token });
   const data = await request<{
-    my_user?: { local_user_view?: { person: { name: string; display_name?: string; avatar?: string }; local_user: { email?: string } } };
+    my_user?: { local_user_view?: { person: { id: number; name: string; display_name?: string; avatar?: string }; local_user: { email?: string } } };
   }>(instance, `/site?${params}`, { token });
   return data.my_user?.local_user_view;
 }

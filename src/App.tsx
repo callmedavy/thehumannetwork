@@ -54,7 +54,7 @@ export default function App() {
           {view === "saved" && <SavedView onOpenPost={setSelectedPost} />}
           {view === "upvoted" && <VoteHistoryView vote="up" onOpenPost={setSelectedPost} />}
           {view === "downvoted" && <VoteHistoryView vote="down" onOpenPost={setSelectedPost} />}
-          {(view === "profile" || view === "settings" || view === "about") && <UtilityView view={view} />}
+          {(view === "profile" || view === "settings" || view === "about") && <UtilityView view={view} onOpenPost={setSelectedPost} />}
           <FilterSheet />
           <MenuDrawer />
           {selectedPost && <PostDetail post={selectedPost} onClose={() => setSelectedPost(null)} onPostVoted={setVotedPostId} />}
