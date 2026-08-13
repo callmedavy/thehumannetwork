@@ -52,7 +52,15 @@ async function request<T>(instance: string, path: string, options: RequestOption
   }
 
   const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(getMessage(payload, `Request failed with status ${response.status}`));
+  if (!response.ok) {
+    // A 404 on `/api/v3/*` almost always means the entered host is not a Lemmy instance
+    // (Mastodon, Kbin/Mbin, a parked domain, or a typo). Say so instead of the generic
+    // "Request failed with status 404" — the toast is the reader's only clue.
+    const fallback = response.status === 404
+      ? `${instance} did not answer as a Lemmy instance (404). Check the address or try another instance.`
+      : `Request failed with status ${response.status}`;
+    throw new Error(getMessage(payload, fallback));
+  }
   return payload as T;
 }
 
@@ -114,9 +122,11 @@ export async function listPosts(instance: string, filters: Filters, pagination: 
     type_: filters.scope,
     sort: resolveSort(filters),
     limit: "20",
-    // Feeds always ask the server to omit read posts, regardless of the account's defaults.
-    show_read: "false",
   });
+  // `show_read` is a user-scoped override on Lemmy 0.19.x. Sending it without a JWT trips
+  // `not_logged_in` on most instances, so anonymous callers omit it entirely (they have no
+  // account-side read state to hide anyway).
+  if (token) params.set("show_read", "false");
   if (useCursor) params.set("page_cursor", pagination.cursor!);
   else params.set("page", String(pagination.page ?? 1));
   // Older Lemmy v3 instances expect auth in the query as well as the bearer header.
