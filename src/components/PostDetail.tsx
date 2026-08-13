@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDown, ArrowUp, Bookmark, ChevronDown, LoaderCircle, Maximize2, MessageCircle, Reply, Send, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { CommentNode, CommentView, PostView } from "../types";
-import { buildCommentTree, compactNumber, communityHandle, postImage, relativeTime } from "../lib/format";
+import { buildCommentTree, compactNumber, communityHandle, postImage, postImageFull, relativeTime } from "../lib/format";
 import { createComment, listComments, voteComment, votePost } from "../lib/lemmy";
 import { queueMarkAsRead } from "../lib/readTracking";
 import { useAppStore } from "../store/useAppStore";
@@ -78,12 +78,16 @@ export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | nu
   const [sending, setSending] = useState(false);
   const [votingCommentId, setVotingCommentId] = useState<number | null>(null);
   const [imageFullscreen, setImageFullscreen] = useState(false);
+  const [fullImageLoaded, setFullImageLoaded] = useState(false);
+  const [fullImageFailed, setFullImageFailed] = useState(false);
   const tree = useMemo(() => buildCommentTree(comments), [comments]);
 
   useEffect(() => {
     if (!post) return;
     syncSavedStatuses([post]);
     setImageFullscreen(false);
+    setFullImageLoaded(false);
+    setFullImageFailed(false);
     setLoading(true);
     listComments(instance, post.post.id, token)
       .then(setComments)
@@ -93,6 +97,11 @@ export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | nu
 
   if (!post) return null;
   const image = postImage(post);
+  const fullImage = postImageFull(post);
+  // Some hosts refuse direct hits that the instance's thumbnail pipeline handles, so keep the
+  // compressed version as both the instant placeholder and the fallback.
+  const upgradeImage = Boolean(image && fullImage && fullImage !== image && !fullImageFailed);
+  const displayImage = upgradeImage && fullImageLoaded ? fullImage : image;
   const saved = savedIds.includes(post.post.id);
 
   async function handleVote(score: -1 | 1) {
@@ -171,7 +180,7 @@ export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | nu
             <button type="button" onClick={onClose} className="shrink-0 rounded-full border border-line bg-canvas p-2.5 text-muted transition hover:text-ink" aria-label="Close post"><X className="h-5 w-5" /></button>
           </div>
           <div className="hide-scrollbar min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
-            {image && <button type="button" onClick={() => setImageFullscreen(true)} className="group relative block w-full bg-canvas" aria-label="View image full screen"><img src={image} alt="" className="h-auto w-full" /><span className="absolute bottom-3 right-3 grid h-9 w-9 place-items-center rounded-full bg-black/55 text-white opacity-90 backdrop-blur-xl transition group-hover:bg-black/70"><Maximize2 className="h-4 w-4" /></span></button>}
+            {image && <button type="button" onClick={() => setImageFullscreen(true)} className="group relative block w-full bg-canvas" aria-label="View image full screen"><img src={image} alt="" className={`h-auto w-full transition-opacity duration-500 ${upgradeImage && fullImageLoaded ? "opacity-0" : "opacity-100"}`} />{upgradeImage && <img src={fullImage!} alt="" onLoad={() => setFullImageLoaded(true)} onError={() => setFullImageFailed(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${fullImageLoaded ? "opacity-100" : "opacity-0"}`} />}<span className="absolute bottom-3 right-3 grid h-9 w-9 place-items-center rounded-full bg-black/55 text-white opacity-90 backdrop-blur-xl transition group-hover:bg-black/70"><Maximize2 className="h-4 w-4" /></span></button>}
             <div className="min-w-0 max-w-full overflow-x-hidden px-5 pb-8 pt-6 sm:px-8">
               <p className="max-w-full truncate text-xs font-bold text-muted">@{post.creator.name} · {relativeTime(post.post.published)}</p>
               <h2 id="post-detail-title" className="mt-2 max-w-full break-words text-3xl font-extrabold leading-[1.05] tracking-[-.04em] [overflow-wrap:anywhere] sm:text-4xl">{post.post.name}</h2>
@@ -189,7 +198,7 @@ export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | nu
         <AnimatePresence>
           {imageFullscreen && image && (
             <motion.div className="fixed inset-0 z-50 grid place-items-center bg-[#03120d]/95 p-3 safe-bottom safe-top" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} role="dialog" aria-modal="true" aria-label="Full-screen post image" onClick={() => setImageFullscreen(false)}>
-              <motion.img src={image} alt="" className="max-h-full max-w-full object-contain" initial={{ scale: 0.94, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.96, opacity: 0 }} transition={{ type: "spring", stiffness: 300, damping: 30 }} />
+              <motion.img src={upgradeImage ? fullImage! : displayImage!} alt="" onLoad={() => setFullImageLoaded(true)} onError={() => setFullImageFailed(true)} className="max-h-full max-w-full object-contain" initial={{ scale: 0.94, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.96, opacity: 0 }} transition={{ type: "spring", stiffness: 300, damping: 30 }} />
               <button type="button" onClick={() => setImageFullscreen(false)} className="absolute right-4 top-4 rounded-full bg-white/10 p-3 text-white backdrop-blur-xl" aria-label="Close full-screen image"><X className="h-5 w-5" /></button>
             </motion.div>
           )}

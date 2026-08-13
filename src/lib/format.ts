@@ -52,9 +52,36 @@ export function communityHandle(post: PostView) {
   }
 }
 
+const IMAGE_URL = /\.(avif|gif|jpe?g|png|webp)(\?.*)?$/i;
+
+// pict-rs downscales through these query params (and, on older deployments, a path segment).
+const THUMBNAIL_PARAMS = ["thumbnail", "resize", "max_width", "max_height"];
+
+function fullResolution(url: string) {
+  try {
+    const parsed = new URL(url);
+    THUMBNAIL_PARAMS.forEach((key) => parsed.searchParams.delete(key));
+    parsed.pathname = parsed.pathname.replace(/\/thumbnail\d+\//i, "/");
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export function postImage(post: PostView) {
   const candidates = [post.post.thumbnail_url, post.post.url];
-  return candidates.find((url) => url && /\.(avif|gif|jpe?g|png|webp)(\?.*)?$/i.test(url)) ?? post.post.thumbnail_url;
+  return candidates.find((url) => url && IMAGE_URL.test(url)) ?? post.post.thumbnail_url;
+}
+
+// Feed cards are fine on the compressed thumbnail, but the detail view should show the original
+// upload. Instances that proxy remote media keep serving it, just without the downscaling params;
+// otherwise the post's own URL is the uncompressed source.
+export function postImageFull(post: PostView) {
+  const thumbnail = postImage(post);
+  if (thumbnail && /\/image_proxy(\?|$)/i.test(thumbnail)) return fullResolution(thumbnail);
+  const source = post.post.url?.trim();
+  if (source && IMAGE_URL.test(source)) return source;
+  return thumbnail ? fullResolution(thumbnail) : thumbnail;
 }
 
 export function publicPostUrl(instance: string, post: PostView) {
