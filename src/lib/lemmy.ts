@@ -122,8 +122,6 @@ export async function listPosts(instance: string, filters: Filters, pagination: 
     type_: filters.scope,
     sort: resolveSort(filters),
     limit: "20",
-    // Feeds always ask the server to omit read posts, regardless of the account's defaults.
-    show_read: "false",
   });
   // `show_read` is a user-scoped override on Lemmy 0.19.x. Sending it without a JWT trips
   // `not_logged_in` on most instances, so anonymous callers omit it entirely (they have no
