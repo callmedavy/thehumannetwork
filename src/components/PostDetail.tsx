@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDown, ArrowUp, Bookmark, ChevronDown, LoaderCircle, Maximize2, MessageCircle, Reply, Send, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, LoaderCircle, Maximize2, MessageCircle, Reply, Send, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { CommentNode, CommentView, PostView } from "../types";
 import { buildCommentTree, compactNumber, communityHandle, postImage, postImageFull, relativeTime } from "../lib/format";
@@ -119,6 +119,17 @@ export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | nu
     }
   }
 
+  // Marking read from the detail sheet mirrors the feed's down gesture: the post is queued for
+  // the batched mark_as_read flush, dropped from the feed queue, and the sheet closes.
+  function handleMarkRead() {
+    if (!token) return toast("Sign in to mark posts as read.");
+    const postId = post!.post.id;
+    queueMarkAsRead(postId);
+    onPostVoted?.(postId);
+    onClose();
+    toast("Marked as read.", "success");
+  }
+
   async function handleComment(event: React.FormEvent) {
     event.preventDefault();
     if (!token || !comment.trim()) return;
@@ -186,13 +197,13 @@ export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | nu
               <h2 id="post-detail-title" className="mt-2 max-w-full break-words text-3xl font-extrabold leading-[1.05] tracking-[-.04em] [overflow-wrap:anywhere] sm:text-4xl">{post.post.name}</h2>
               {post.post.body && <div className="markdown-body mt-5 text-sm leading-7 text-ink/85"><ReactMarkdown>{post.post.body}</ReactMarkdown></div>}
               {post.post.url && !image && <a href={post.post.url} target="_blank" rel="noreferrer" className="mt-5 block overflow-hidden text-ellipsis rounded-2xl border border-line bg-canvas p-4 text-xs font-bold text-sprout underline">{post.post.url}</a>}
-              <div className="mt-8 flex items-center gap-4 border-y border-line py-4 text-xs font-bold text-muted"><span>{compactNumber(post.counts.score)} points</span><span className="flex items-center gap-1.5"><MessageCircle className="h-4 w-4" />{compactNumber(post.counts.comments)} comments</span></div>
+              <div className="mt-8 flex items-center gap-4 border-y border-line py-4 text-xs font-bold text-muted"><span>{compactNumber(post.counts.score)} points</span><span className="flex items-center gap-1.5"><MessageCircle className="h-4 w-4" />{compactNumber(post.counts.comments)} comments</span><button type="button" onClick={() => toggleSaved(post.post.id)} disabled={!token} aria-pressed={saved} aria-label={saved ? "Remove post from saved" : "Save post"} className={`ml-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 transition disabled:opacity-35 ${saved ? "bg-ink text-panel" : "bg-canvas hover:text-ink"}`}><Bookmark className={`h-4 w-4 ${saved ? "fill-current" : ""}`} />{saved ? "Saved" : "Save"}</button></div>
               <section className="min-w-0 max-w-full overflow-hidden pt-5"><h3 className="font-display text-2xl">Conversation</h3>{loading ? <LoadingScreen label="Loading conversation" className="py-5" /> : tree.length ? <div className="mt-2 min-w-0 max-w-full divide-y divide-line overflow-hidden">{tree.map((node) => <Comment key={node.comment.id} node={node} canVote={Boolean(token)} votingId={votingCommentId} onVote={handleCommentVote} onReply={handleReply} />)}</div> : <p className="py-10 text-center text-sm text-muted">Quiet in here. Start something thoughtful.</p>}</section>
             </div>
           </div>
           <div className="safe-bottom border-t border-line bg-panel/95 px-4 pt-3 backdrop-blur-xl">
             {token && <form onSubmit={handleComment} className="mb-3 flex items-center gap-2"><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Add to the conversation…" aria-label="Comment" className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-canvas px-3 text-sm outline-none focus:border-ink" /><button type="submit" disabled={sending || !comment.trim()} aria-label="Post comment" className="grid h-11 w-11 place-items-center rounded-xl bg-ink text-panel disabled:opacity-40">{sending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button></form>}
-            <div className="grid grid-cols-3 gap-2"><button type="button" onClick={() => handleVote(-1)} disabled={!token} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-canvas text-xs font-extrabold text-flare disabled:opacity-35"><ArrowDown className="h-4 w-4" />Down</button><button type="button" onClick={() => toggleSaved(post.post.id)} disabled={!token} className={`flex h-11 items-center justify-center gap-2 rounded-xl text-xs font-extrabold disabled:opacity-35 ${saved ? "bg-ink text-panel" : "bg-canvas"}`}><Bookmark className={`h-4 w-4 ${saved ? "fill-current" : ""}`} />Save</button><button type="button" onClick={() => handleVote(1)} disabled={!token} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-canvas text-xs font-extrabold text-sprout disabled:opacity-35"><ArrowUp className="h-4 w-4" />Up</button></div>
+            <div className="grid grid-cols-3 gap-2"><button type="button" onClick={() => handleVote(-1)} disabled={!token} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-canvas text-xs font-extrabold text-flare disabled:opacity-35"><ArrowDown className="h-4 w-4" />Down</button><button type="button" onClick={handleMarkRead} disabled={!token} aria-label="Mark post as read and close" className="flex h-11 items-center justify-center gap-2 rounded-xl bg-canvas text-xs font-extrabold disabled:opacity-35"><Check className="h-4 w-4" />Mark read</button><button type="button" onClick={() => handleVote(1)} disabled={!token} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-canvas text-xs font-extrabold text-sprout disabled:opacity-35"><ArrowUp className="h-4 w-4" />Up</button></div>
           </div>
         </motion.section>
         <AnimatePresence>
