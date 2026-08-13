@@ -10,19 +10,15 @@ interface SwipeCardProps {
   depth: number;
   active: boolean;
   canVote: boolean;
-  // Read marking writes to the Lemmy account, so the down gesture needs a signed-in session
-  // to actually mark. `canAdvance` is the anonymous fallback: the down gesture still
-  // commits, but the parent treats it as a local "skip" instead of an account write.
+  // Read marking writes to the Lemmy account, so the down gesture needs a signed-in session.
   canMarkRead: boolean;
-  canAdvance?: boolean;
   // Other communities carrying the same link, when cross-post collapsing is switched on.
   alsoPostedIn?: Community[];
   onSwipe: (direction: SwipeDirection) => void;
   onOpen: () => void;
 }
 
-export function SwipeCard({ post, depth, active, canVote, canMarkRead, canAdvance = false, alsoPostedIn, onSwipe, onOpen }: SwipeCardProps) {
-  const downEnabled = canMarkRead || canAdvance;
+export function SwipeCard({ post, depth, active, canVote, canMarkRead, alsoPostedIn, onSwipe, onOpen }: SwipeCardProps) {
   const x = useMotionValue(0);
   const y = useMotionValue(0);
   const rotate = useTransform(x, [-400, 0, 400], [-15, 0, 15]);
@@ -67,7 +63,7 @@ export function SwipeCard({ post, depth, active, canVote, canMarkRead, canAdvanc
   function handleDragEnd(_: unknown, info: { offset: { x: number; y: number } }) {
     const horizontalThreshold = window.innerWidth * 0.35;
     const verticalThreshold = Math.min(window.innerHeight * 0.2, 160);
-    if (info.offset.y > verticalThreshold && info.offset.y > Math.abs(info.offset.x) && downEnabled) commit("down");
+    if (info.offset.y > verticalThreshold && info.offset.y > Math.abs(info.offset.x) && canMarkRead) commit("down");
     else if (info.offset.x > horizontalThreshold && canVote) commit("right");
     else if (info.offset.x < -horizontalThreshold && canVote) commit("left");
   }
@@ -115,7 +111,7 @@ export function SwipeCard({ post, depth, active, canVote, canMarkRead, canAdvanc
       initial={{ opacity: 0, scale: scale - 0.03, y: translateY + 18 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
       className={`absolute inset-0 overflow-hidden rounded-[1.75rem] border border-line bg-panel shadow-card ${active ? "cursor-grab active:cursor-grabbing" : "pointer-events-none"}`}
-      aria-label={`${post.post.name}.${canMarkRead ? " Swipe down to mark read." : canAdvance ? " Swipe down to skip." : ""}${canVote ? " Swipe right to upvote or left to downvote." : ""}`}
+      aria-label={`${post.post.name}.${canMarkRead ? " Swipe down to mark read." : ""}${canVote ? " Swipe right to upvote or left to downvote." : ""}`}
     >
       {active && (
         <>
@@ -130,8 +126,8 @@ export function SwipeCard({ post, depth, active, canVote, canMarkRead, canAdvanc
             )}
           </motion.div>
           <motion.div style={{ opacity: downGlow }} className="pointer-events-none absolute inset-0 z-30 flex items-start justify-center rounded-[1.75rem] border-[3px] border-ink/70 bg-ink/10 pt-8 shadow-[inset_0_0_80px_rgb(var(--ink)/.2)]">
-            {downEnabled && dragDirection === "down" && (
-              <span className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-extrabold uppercase tracking-[.16em] text-panel shadow-soft"><Check className="h-4 w-4" /> {canMarkRead ? "Mark read" : "Next"}</span>
+            {canMarkRead && dragDirection === "down" && (
+              <span className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-extrabold uppercase tracking-[.16em] text-panel shadow-soft"><Check className="h-4 w-4" /> Mark read</span>
             )}
           </motion.div>
         </>

@@ -1,2 +1,9 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+*.tsbuildinfo
+
 # Local Netlify folder
 .netlify

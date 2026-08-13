@@ -152,16 +152,8 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   async function finalizeSwipe(direction: SwipeDirection) {
     const post = current;
     if (!post) return;
-    // Anonymous readers cannot vote or mark-as-read on the account, but the down gesture and
-    // the center button still advance the stack locally — the card is dropped from the queue
-    // and no network call is made.
     if (!token) {
-      if (direction === "down") {
-        setQueue((currentQueue) => currentQueue.filter((item) => item.post.id !== post.post.id));
-        if (haptics && "vibrate" in navigator) navigator.vibrate(10);
-        return;
-      }
-      toast("Sign in to vote.");
+      toast(direction === "down" ? "Sign in to mark posts as read." : "Sign in to vote.");
       return;
     }
     // Optimistic: the card is gone before any request leaves the browser.
@@ -196,7 +188,7 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
       <div className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col overflow-hidden px-4 pb-5 pt-[5.8rem] safe-bottom">
         <div className="relative mx-auto min-h-0 w-full flex-1 max-w-[27rem]">
           {loading ? <LoadingScreen label="Loading feed" className="absolute inset-0" /> : current ? visibleQueue.slice(0, 3).map((post, index) => (
-            <SwipeCard key={post.post.id} post={post} alsoPostedIn={crossPosts[post.post.id]} depth={index} active={index === 0} canVote={Boolean(token)} canMarkRead={Boolean(token)} canAdvance={!token} onSwipe={finalizeSwipe} onOpen={() => onOpenPost(post)} />
+            <SwipeCard key={post.post.id} post={post} alsoPostedIn={crossPosts[post.post.id]} depth={index} active={index === 0} canVote={Boolean(token)} canMarkRead={Boolean(token)} onSwipe={finalizeSwipe} onOpen={() => onOpenPost(post)} />
           )).reverse() : (
             <div className="absolute inset-0 grid place-items-center rounded-[1.75rem] border border-dashed border-line bg-panel/60 p-8 text-center">
               <div><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-canvas"><Sparkles className="h-7 w-7 text-sprout" /></span><h2 className="mt-5 font-display text-3xl">You’re all caught up ✨</h2><p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-muted">You reached the edge of this feed. Refresh it, or tune your filters for a different corner of the fediverse.</p><button type="button" onClick={refresh} className="mx-auto mt-5 flex items-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-xs font-extrabold text-panel"><RotateCcw className="h-4 w-4" />Refresh feed</button></div>
@@ -204,8 +196,8 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
           )}
         </div>
         <div className="relative z-20 mt-5 shrink-0">
-          {current && <ActionRail onAction={finalizeSwipe} onRead={() => finalizeSwipe("down")} canVote={Boolean(token)} canMarkRead={Boolean(token)} canAdvance />}
-          <p className="mt-3 text-center text-[9px] font-bold uppercase tracking-[.18em] text-muted/70">{token ? "Down marks read · left downvotes · right upvotes" : "Swipe down or tap Next to skip · sign in to vote"}</p>
+          {current && <ActionRail onAction={finalizeSwipe} onRead={() => finalizeSwipe("down")} canVote={Boolean(token)} canMarkRead={Boolean(token)} />}
+          <p className="mt-3 text-center text-[9px] font-bold uppercase tracking-[.18em] text-muted/70">{token ? "Down marks read · left downvotes · right upvotes" : "Sign in to vote and mark posts read · tap a card to open it"}</p>
         </div>
       </div>
     </main>
