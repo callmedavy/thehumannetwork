@@ -2,6 +2,9 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 const HOST_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/;
+const REPLIT_DEV_HOST = (
+  globalThis as { process?: { env?: Record<string, string | undefined> } }
+).process?.env?.REPLIT_DEV_DOMAIN;
 
 type DevRequest = AsyncIterable<Uint8Array> & {
   url?: string;
@@ -72,4 +75,9 @@ function lemmyProxy(): Plugin {
 
 export default defineConfig({
   plugins: [react(), lemmyProxy()],
+  server: {
+    host: "0.0.0.0",
+    port: 5000,
+    allowedHosts: REPLIT_DEV_HOST ? [REPLIT_DEV_HOST] : [],
+  },
 });
