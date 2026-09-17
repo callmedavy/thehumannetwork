@@ -186,6 +186,17 @@ button {
   max-width: 100%;
 }
 
+.markdown-body p:last-child,
+.markdown-body ul:last-child,
+.markdown-body ol:last-child,
+.markdown-body blockquote:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body img {
+  height: auto;
+}
+
 .markdown-body ul,
 .markdown-body ol {
   padding-left: 1.3rem;

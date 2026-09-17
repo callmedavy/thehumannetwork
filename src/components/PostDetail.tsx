@@ -6,8 +6,26 @@ import type { CommentNode, CommentView, PostView } from "../types";
 import { buildCommentTree, compactNumber, communityHandle, postImage, postImageFull, relativeTime } from "../lib/format";
 import { createComment, listComments, voteComment, votePost } from "../lib/lemmy";
 import { queueMarkAsRead } from "../lib/readTracking";
+import remarkBareImages from "../lib/remarkBareImages";
 import { useAppStore } from "../store/useAppStore";
 import { LoadingScreen } from "./LoadingScreen";
+
+function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) return <a href={src} target="_blank" rel="noreferrer noopener">{alt || src}</a>;
+  return <img src={src} alt={alt ?? ""} loading="lazy" decoding="async" onError={() => setFailed(true)} className="my-2 block max-h-[420px] w-auto max-w-full rounded-xl bg-canvas object-contain" />;
+}
+
+function MarkdownLink({ href, children }: { href?: string; children?: React.ReactNode }) {
+  return <a href={href} target="_blank" rel="noreferrer noopener">{children}</a>;
+}
+
+const markdownComponents = { img: MarkdownImage, a: MarkdownLink };
+const remarkPlugins = [remarkBareImages];
+
+export function LemmyMarkdown({ children, className = "" }: { children: string; className?: string }) {
+  return <div className={`markdown-body ${className}`}><ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>{children}</ReactMarkdown></div>;
+}
 
 interface CommentProps {
   node: CommentNode;
@@ -48,7 +66,7 @@ function Comment({ node, depth = 0, canVote, votingId, onVote, onReply }: Commen
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-[11px]"><strong className="truncate">@{node.creator.name}</strong><span className="text-muted">{relativeTime(node.comment.published)}</span></div>
-          <p className="mt-1 max-w-full whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]">{unavailable ? "Comment unavailable" : node.comment.content}</p>
+          {unavailable ? <p className="mt-1 text-sm italic text-muted">Comment unavailable</p> : <LemmyMarkdown className="mt-1 text-sm leading-relaxed">{node.comment.content}</LemmyMarkdown>}
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-muted">
             <button type="button" onClick={() => onVote(node, 1)} disabled={!canVote || voting} className={`grid h-7 w-7 place-items-center rounded-full transition disabled:opacity-35 ${node.my_vote === 1 ? "bg-sprout text-white" : "bg-canvas hover:text-sprout"}`} aria-label={`Upvote comment by ${node.creator.name}`}><ArrowUp className="h-3.5 w-3.5" /></button>
             <span className="min-w-8 text-center">{compactNumber(node.counts.score)}</span>
@@ -195,7 +213,7 @@ export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | nu
             <div className="min-w-0 max-w-full overflow-x-hidden px-5 pb-8 pt-6 sm:px-8">
               <p className="max-w-full truncate text-xs font-bold text-muted">@{post.creator.name} · {relativeTime(post.post.published)}</p>
               <h2 id="post-detail-title" className="mt-2 max-w-full break-words text-3xl font-extrabold leading-[1.05] tracking-[-.04em] [overflow-wrap:anywhere] sm:text-4xl">{post.post.name}</h2>
-              {post.post.body && <div className="markdown-body mt-5 text-sm leading-7 text-ink/85"><ReactMarkdown>{post.post.body}</ReactMarkdown></div>}
+              {post.post.body && <LemmyMarkdown className="mt-5 text-sm leading-7 text-ink/85">{post.post.body}</LemmyMarkdown>}
               {post.post.url && !image && <a href={post.post.url} target="_blank" rel="noreferrer" className="mt-5 block overflow-hidden text-ellipsis rounded-2xl border border-line bg-canvas p-4 text-xs font-bold text-sprout underline">{post.post.url}</a>}
               <div className="mt-8 flex items-center gap-4 border-y border-line py-4 text-xs font-bold text-muted"><span>{compactNumber(post.counts.score)} points</span><span className="flex items-center gap-1.5"><MessageCircle className="h-4 w-4" />{compactNumber(post.counts.comments)} comments</span><button type="button" onClick={() => toggleSaved(post.post.id)} disabled={!token} aria-pressed={saved} aria-label={saved ? "Remove post from saved" : "Save post"} className={`ml-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 transition disabled:opacity-35 ${saved ? "bg-ink text-panel" : "bg-canvas hover:text-ink"}`}><Bookmark className={`h-4 w-4 ${saved ? "fill-current" : ""}`} />{saved ? "Saved" : "Save"}</button></div>
               <section className="min-w-0 max-w-full overflow-hidden pt-5"><h3 className="font-display text-2xl">Conversation</h3>{loading ? <LoadingScreen label="Loading conversation" className="py-5" /> : tree.length ? <div className="mt-2 min-w-0 max-w-full divide-y divide-line overflow-hidden">{tree.map((node) => <Comment key={node.comment.id} node={node} canVote={Boolean(token)} votingId={votingCommentId} onVote={handleCommentVote} onReply={handleReply} />)}</div> : <p className="py-10 text-center text-sm text-muted">Quiet in here. Start something thoughtful.</p>}</section>
