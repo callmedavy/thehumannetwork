@@ -8,6 +8,7 @@ The Human Network is a static React/Vite SPA deployed on Netlify. It has no appl
 
 - `src/components/` contains screens, overlays, cards, and reusable UI.
 - `src/lib/lemmy.ts` is the only Lemmy REST transport layer.
+- `src/lib/readSet.ts` is the device-local read set: the browser's own record of posts the reader has marked read.
 - `src/lib/format.ts` contains display helpers and comment-tree normalization.
 - `src/store/useAppStore.ts` owns authentication state, local persistence, navigation, settings, and toasts.
 - `src/types.ts` contains shared Lemmy and UI types.
@@ -26,10 +27,11 @@ The Human Network is a static React/Vite SPA deployed on Netlify. It has no appl
 ## Non-obvious Decisions
 
 - Lemmy v3 deployments differ in auth handling, so authenticated requests use the bearer header and legacy `auth` payload/query fields.
+- Read filtering is enforced in the browser by `src/lib/readSet.ts`, keyed on `post.ap_id`. The server-side `show_read=false` flag only covers signed-in readers on instances new enough to honour it (0.19.4+), and it cannot affect a post already sitting in the feed queue — so the device-local set is what keeps a read post from coming back for anonymous readers, on older instances, and within the current deck.
 - Saved posts are loaded from and updated on the authenticated user's Lemmy instance; no saved-post IDs persist locally.
 - Text-only posts use a deterministic title-to-hue gradient so they remain visually distinct without placeholder artwork.
 - The app sends no analytics and needs no environment variables.
 
 ## Validation
 
-The platform pipeline runs installation and production validation. For local work, use `npm run dev`; use `npm run build` before a manual release when permitted by the execution environment.
+The platform pipeline runs installation and production validation. For local work, use `npm run dev`; use `npm run build` before a manual release when permitted by the execution environment. `npm run verify:read-set` checks the read-set invariants (ap_id keying, reload persistence, cap, quota handling) without a browser.

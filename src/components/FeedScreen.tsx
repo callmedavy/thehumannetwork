@@ -5,11 +5,19 @@ import { listPosts, votePost } from "../lib/lemmy";
 import { crossPostKey } from "../lib/format";
 import { flushPendingReads, queueMarkAsRead } from "../lib/readTracking";
 import { hasActiveVote } from "../lib/hideVotedFilter";
+import { isPostRead } from "../lib/readSet";
 import { useAppStore } from "../store/useAppStore";
 import { BrandMark } from "./BrandMark";
 import { SwipeCard } from "./SwipeCard";
 import { ActionRail } from "./ActionRail";
 import { LoadingScreen } from "./LoadingScreen";
+
+// A feed can hand back page after page of posts this device has already read — most likely for
+// anonymous readers and on instances predating 0.19.4, where nothing filters read posts
+// server-side. Draining those pages without limit would hammer the instance (Lemmy rate-limits
+// per IP), so after this many consecutive pages that yield nothing new the feed stops and shows
+// its end-of-feed card. Refresh, or different filters, are the way past it.
+const READ_DRAIN_LIMIT = 5;
 
 export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: PostView) => void; votedPostId?: number | null }) {
   const instance = useAppStore((state) => state.instance);
@@ -35,18 +43,24 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   const crossPostOwners = useRef(new Map<string, number>());
   const fetching = useRef(false);
   const generation = useRef(0);
+  // Consecutive fetches that added nothing the reader has not already read (see READ_DRAIN_LIMIT).
+  const readDrainPages = useRef(0);
 
   // A change to any of these makes the stored cursor meaningless, so the feed starts over.
   const scopeKey = `${instance}|${token ? "account" : "guest"}|${filters.scope}|${filters.order}|${filters.date}`;
 
-  // Render list and top-up trigger read from the same filtered queue. Two render-time filters
+  // Render list and top-up trigger read from the same filtered queue. Three render-time filters
   // only: the post just voted on from the detail sheet (optimistic hide while its read flush is
-  // in flight), and — when the preference is on — posts the account already voted on. The
-  // voted-posts filter is the codebase's one sanctioned client-side post filter (see
-  // lib/hideVotedFilter.ts); it stays at render time so switching it off restores the posts.
+  // in flight), posts on this device's read set, and — when the preference is on — posts the
+  // account already voted on. The read-set filter is what actually holds a marked-read post out
+  // of the deck: a post marked read from the detail sheet is dropped from no queue, so a filter
+  // here is the only thing that stops it coming back, and it also catches posts re-fetched after
+  // a refresh, a reload, or a change of instance. Unlike the voted-posts filter it has no off
+  // switch on purpose — read is meant to be permanent — and is cleared from Settings instead
+  // (lib/readSet.ts, lib/hideVotedFilter.ts).
   const visibleQueue = useMemo(
-    () => queue.filter((post) => post.post.id !== votedPostId && !(hideVotedPosts && token && hasActiveVote(post))),
-    [queue, votedPostId, hideVotedPosts, token],
+    () => queue.filter((post) => post.post.id !== votedPostId && !isPostRead(instance, post.post) && !(hideVotedPosts && token && hasActiveVote(post))),
+    [queue, votedPostId, hideVotedPosts, token, instance],
   );
   const current = visibleQueue[0];
 
@@ -56,6 +70,7 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
     pageNumber.current = 1;
     appendedIds.current = new Set<number>();
     crossPostOwners.current = new Map<string, number>();
+    readDrainPages.current = 0;
     setQueue([]);
     setCrossPosts({});
     setExhausted(false);
@@ -118,7 +133,14 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
       cursor.current = page.nextCursor;
       pageNumber.current += 1;
       ingestPosts(page.posts);
-      setExhausted(page.posts.length === 0 || (page.cursorPagination && !page.nextCursor));
+      // Counts what the reader has not already read on this device, whatever the server returned.
+      const unseen = page.posts.filter((post) => !isPostRead(instance, post.post)).length;
+      readDrainPages.current = unseen ? 0 : readDrainPages.current + 1;
+      setExhausted(
+        page.posts.length === 0
+        || (page.cursorPagination && !page.nextCursor)
+        || readDrainPages.current >= READ_DRAIN_LIMIT,
+      );
     } catch (error) {
       if (generation.current !== currentGeneration) return;
       toast(error instanceof Error ? error.message : "Could not load the feed.", "error");
@@ -152,11 +174,13 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   async function finalizeSwipe(direction: SwipeDirection) {
     const post = current;
     if (!post) return;
-    // Anonymous readers cannot vote or mark-as-read on the account, but the down gesture and
-    // the center button still advance the stack locally — the card is dropped from the queue
-    // and no network call is made.
+    // Anonymous readers cannot vote or mark a post read on the account, but the down gesture
+    // and the center button still advance the stack locally: the card leaves the queue and the
+    // post joins the device-local read set, so it does not come back on the next fetch or
+    // reload. No network call is made.
     if (!token) {
       if (direction === "down") {
+        queueMarkAsRead(post.post.id, post.post.ap_id);
         setQueue((currentQueue) => currentQueue.filter((item) => item.post.id !== post.post.id));
         if (haptics && "vibrate" in navigator) navigator.vibrate(10);
         return;
@@ -169,7 +193,7 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
     if (haptics && "vibrate" in navigator) navigator.vibrate(10);
 
     if (direction === "down") {
-      queueMarkAsRead(post.post.id);
+      queueMarkAsRead(post.post.id, post.post.ap_id);
       return;
     }
 
@@ -177,7 +201,7 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
       await votePost(instance, post.post.id, direction === "right" ? 1 : -1, token);
       // A vote counts as intentional engagement, so it also marks the post read — but only
       // once the vote actually landed.
-      queueMarkAsRead(post.post.id);
+      queueMarkAsRead(post.post.id, post.post.ap_id);
     } catch (error) {
       toast(error instanceof Error ? error.message : "Vote failed.", "error");
     }
