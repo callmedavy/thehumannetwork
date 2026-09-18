@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useDragControls } from "framer-motion";
 import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, LoaderCircle, Maximize2, MessageCircle, Reply, Send, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { CommentNode, CommentView, PostView } from "../types";
@@ -84,6 +84,7 @@ function Comment({ node, depth = 0, canVote, votingId, onVote, onReply }: Commen
 }
 
 export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | null; onClose: () => void; onPostVoted?: (postId: number) => void }) {
+  const dragControls = useDragControls();
   const instance = useAppStore((state) => state.instance);
   const token = useAppStore((state) => state.token);
   const savedIds = useAppStore((state) => state.savedIds);
@@ -201,16 +202,28 @@ export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | nu
       <motion.div className="fixed inset-0 z-40 overflow-x-hidden bg-[#03120d]/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
         <motion.section
           initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-          drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.05, bottom: 0.65 }} onDragEnd={(_, info) => { if (info.offset.y > 140) onClose(); }}
+          drag="y" dragControls={dragControls} dragListener={false}
+          dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.05, bottom: 0.65 }} onDragEnd={(_, info) => { if (info.offset.y > 140) onClose(); }}
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
           className="absolute inset-x-0 bottom-0 mx-auto flex h-[96dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-[2rem] border border-line bg-panel shadow-card"
           role="dialog" aria-modal="true" aria-labelledby="post-detail-title"
         >
           <div className="safe-top z-20 flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel px-4 pb-3">
+            <button
+              type="button"
+              onPointerDown={(event) => dragControls.start(event)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") onClose();
+              }}
+              className="absolute left-1/2 top-0 grid h-11 w-20 -translate-x-1/2 touch-none cursor-grab place-items-start pt-2 active:cursor-grabbing"
+              aria-label="Drag down or press Enter to close post"
+            >
+              <span className="mx-auto block h-1 w-10 rounded-full bg-line" />
+            </button>
             <span className="min-w-0 truncate rounded-full border border-line bg-canvas px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[.16em] text-muted">{communityHandle(post)}</span>
             <button type="button" onClick={onClose} className="shrink-0 rounded-full border border-line bg-canvas p-2.5 text-muted transition hover:text-ink" aria-label="Close post"><X className="h-5 w-5" /></button>
           </div>
-          <div className="hide-scrollbar min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+          <div className="hide-scrollbar min-h-0 min-w-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
             {image && <button type="button" onClick={() => setImageFullscreen(true)} className="group relative block w-full bg-canvas" aria-label="View image full screen"><img src={image} alt="" className={`h-auto w-full transition-opacity duration-500 ${upgradeImage && fullImageLoaded ? "opacity-0" : "opacity-100"}`} />{upgradeImage && <img src={fullImage!} alt="" onLoad={() => setFullImageLoaded(true)} onError={() => setFullImageFailed(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${fullImageLoaded ? "opacity-100" : "opacity-0"}`} />}<span className="absolute bottom-3 right-3 grid h-9 w-9 place-items-center rounded-full bg-black/55 text-white opacity-90 backdrop-blur-xl transition group-hover:bg-black/70"><Maximize2 className="h-4 w-4" /></span></button>}
             <div className="min-w-0 max-w-full overflow-x-hidden px-5 pb-8 pt-6 sm:px-8">
               <p className="max-w-full truncate text-xs font-bold text-muted">@{post.creator.name} · {relativeTime(post.post.published)}</p>
