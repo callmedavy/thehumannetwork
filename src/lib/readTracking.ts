@@ -1,4 +1,5 @@
 import { markPostsRead } from "./lemmy";
+import { markPostRead } from "./readSet";
 
 /**
  * Server-side read tracking against the Lemmy account (0.19.4+).
@@ -17,8 +18,14 @@ import { markPostsRead } from "./lemmy";
  * the view changes (callers invoke {@link flushPendingReads}), or the page hides/unloads.
  * Single-ID request loops are never sent.
  *
- * **Auth.** Read state lives on the Lemmy account, so every path here no-ops without a JWT.
- * The UI hides its triggers for anonymous readers; this module is the backstop.
+ * **Device-local set.** Every call also writes the post to the browser's own read set
+ * (`readSet.ts`) before anything touches the network. That set is what keeps a read post out of
+ * the deck for anonymous readers, on instances that ignore `show_read` (pre-0.19.4), and for
+ * posts that are already sitting in the feed queue. The account flush below covers none of those.
+ *
+ * **Auth.** The account-side flush no-ops without a JWT — read state on the Lemmy account needs
+ * one, and the UI hides its triggers for anonymous readers. It is the extra, not the base: the
+ * device-local write above happens either way.
  *
  * **Failure.** A failed flush logs and returns its IDs to the buffer for later attempts —
  * three per ID, then the ID is dropped and logged. Flushes are fire-and-forget: they never
@@ -45,6 +52,10 @@ let sessionGeneration = 0;
  * Points the tracker at the active Lemmy session. The store calls this on hydrate, sign-in,
  * browse, and logout. Any IDs still buffered for the previous account are flushed with the
  * previous credentials first — they must never be replayed against a different account.
+ *
+ * The device-local read set in `readSet.ts` is deliberately untouched here: it is a record of
+ * what this browser has read, not of what an account has read, so a logout or an instance change
+ * must not resurrect posts the reader has already been through.
  */
 export function configureReadTracking(instance: string, token: string | null) {
   if (session.token && pending.size) flushPendingReads();
@@ -56,11 +67,15 @@ export function configureReadTracking(instance: string, token: string | null) {
 }
 
 /**
- * Queues a post ID for the next batched mark_as_read flush. Call this from the two
- * sanctioned triggers only: the "Mark Read" action, and a successful vote response.
+ * Queues a post for read. Call this from the two sanctioned triggers only: the "Mark Read"
+ * action, and a successful vote response.
+ *
+ * The device-local write happens first and unconditionally — it is the half that works without
+ * an account and the half the feed's filter reads. `apId` is the post's ActivityPub id and is
+ * what the local set is keyed on; omit it only when the post genuinely has none.
  */
-export function queueMarkAsRead(postId: number) {
-  // TODO: anonymous fallback (tracking read posts without an account) is out of scope.
+export function queueMarkAsRead(postId: number, apId?: string | null) {
+  markPostRead(session.instance, { id: postId, ap_id: apId ?? undefined });
   if (!session.token || !session.instance) return;
   pending.add(postId);
   if (pending.size >= BATCH_CAP) flushPendingReads();

@@ -130,19 +130,21 @@ export function PostDetail({ post, onClose, onPostVoted }: { post: PostView | nu
     try {
       await votePost(instance, postId, score, token);
       // A vote is intentional engagement: it also marks the post read, once the vote landed.
-      queueMarkAsRead(postId);
+      queueMarkAsRead(postId, post!.post.ap_id);
       toast(score === 1 ? "Upvoted." : "Downvoted.", "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Vote failed.", "error");
     }
   }
 
-  // Marking read from the detail sheet mirrors the feed's down gesture: the post is queued for
-  // the batched mark_as_read flush, dropped from the feed queue, and the sheet closes.
+  // Marking read from the detail sheet mirrors the feed's down gesture: the post joins the
+  // device-local read set, is queued for the batched mark_as_read flush, and the sheet closes.
+  // The feed holds it out on the strength of the read set — the post is dropped from no queue
+  // here, so without that set it would return as soon as the sheet closed.
   function handleMarkRead() {
     if (!token) return toast("Sign in to mark posts as read.");
     const postId = post!.post.id;
-    queueMarkAsRead(postId);
+    queueMarkAsRead(postId, post!.post.ap_id);
     onPostVoted?.(postId);
     onClose();
     toast("Marked as read.", "success");
