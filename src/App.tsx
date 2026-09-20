@@ -13,6 +13,7 @@ import { ToastStack } from "./components/ToastStack";
 import { LoadingScreen } from "./components/LoadingScreen";
 import { NotificationsView } from "./components/NotificationsView";
 import { PublishPostView } from "./components/PublishPostView";
+import { HomeScreen } from "./components/HomeScreen";
 
 const themeColors: Record<ThemePreference, string> = {
   forest: "#081D15",
@@ -35,6 +36,7 @@ export default function App() {
   const view = useAppStore((state) => state.view);
   const [selectedPost, setSelectedPost] = useState<PostView | null>(null);
   const [votedPostId, setVotedPostId] = useState<number | null>(null);
+  const [authMode, setAuthMode] = useState<"home" | "login">("home");
 
   useEffect(() => hydrate(), [hydrate]);
 
@@ -46,7 +48,7 @@ export default function App() {
 
   return (
     <div className="app-shell grain min-h-[100dvh] bg-canvas text-ink">
-      {!instance ? <LoginScreen /> : (
+      {!instance ? (authMode === "home" ? <HomeScreen onGetStarted={() => useAppStore.getState().browse("lemmy.world")} onLogin={() => setAuthMode("login")} /> : <LoginScreen onBack={() => setAuthMode("home")} />) : (
         <>
           {view === "feed" && <FeedScreen onOpenPost={setSelectedPost} votedPostId={votedPostId} />}
           {view === "publish" && <PublishPostView onPublished={setSelectedPost} />}

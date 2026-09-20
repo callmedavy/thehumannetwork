@@ -43,7 +43,7 @@ function FloatingInput({
   );
 }
 
-export function LoginScreen() {
+export function LoginScreen({ onBack }: { onBack?: () => void }) {
   const signIn = useAppStore((state) => state.signIn);
   const browse = useAppStore((state) => state.browse);
   const toast = useAppStore((state) => state.toast);
@@ -90,7 +90,7 @@ export function LoginScreen() {
       >
         <div className="mb-9 flex items-start justify-between">
           <BrandMark />
-          <span className="rounded-full border border-line bg-canvas/70 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[.16em] text-muted">Fediverse native</span>
+          <button type="button" onClick={onBack} className="rounded-full border border-line bg-canvas/70 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[.16em] text-muted transition hover:border-ink hover:text-ink">Back to welcome</button>
         </div>
         <div className="mb-7">
           <h1 className="max-w-xs font-display text-[2.8rem] leading-[.95] tracking-[-.04em]">Your feed,<br /><em>felt differently.</em></h1>
