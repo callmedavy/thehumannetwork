@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, Check, ChevronDown, EyeOff, Link2, LoaderCircle, Menu, Send, ShieldCheck } from "lucide-react";
-import { createPost, listPublishCommunities } from "../lib/lemmy";
+import { AlertTriangle, Check, ChevronDown, EyeOff, ImagePlus, Link2, LoaderCircle, Menu, Send, ShieldCheck, X } from "lucide-react";
+import { createPost, deleteUploadedImage, listPublishCommunities, uploadImage } from "../lib/lemmy";
 import { useAppStore } from "../store/useAppStore";
 import type { Community, PostView } from "../types";
 import { BrandMark } from "./BrandMark";
@@ -11,6 +11,8 @@ interface PublishPostViewProps {
 }
 
 type ContentRating = "sfw" | "nsfw" | null;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
 
 export function PublishPostView({ onPublished }: PublishPostViewProps) {
   const instance = useAppStore((state) => state.instance);
@@ -23,6 +25,8 @@ export function PublishPostView({ onPublished }: PublishPostViewProps) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [url, setUrl] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState("");
   const [rating, setRating] = useState<ContentRating>(null);
   const [loadingCommunities, setLoadingCommunities] = useState(true);
   const [communityError, setCommunityError] = useState("");
@@ -56,8 +60,35 @@ export function PublishPostView({ onPublished }: PublishPostViewProps) {
     return () => { active = false; };
   }, [instance, token]);
 
+  useEffect(() => {
+    if (!imageFile) {
+      setImagePreview("");
+      return;
+    }
+    const objectUrl = URL.createObjectURL(imageFile);
+    setImagePreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [imageFile]);
+
   const selectedCommunity = useMemo(() => communities.find((community) => community.id === Number(communityId)), [communities, communityId]);
   const canPublish = Boolean(token && title.trim() && communityId && rating && !loadingCommunities && !publishing);
+
+  function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    if (!file) return;
+    setFormError("");
+    if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+      setFormError("Choose a JPEG, PNG, GIF, WebP, or AVIF image.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setFormError("Choose an image smaller than 4 MB.");
+      return;
+    }
+    setImageFile(file);
+    setUrl("");
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -88,18 +119,24 @@ export function PublishPostView({ onPublished }: PublishPostViewProps) {
     }
 
     setPublishing(true);
+    let uploadedImage: Awaited<ReturnType<typeof uploadImage>> | null = null;
     try {
+      uploadedImage = imageFile ? await uploadImage(instance, imageFile, token) : null;
+      const postUrl = uploadedImage?.url ?? (normalizedUrl || undefined);
       const response = await createPost(instance, {
         name: title.trim(),
         communityId: Number(communityId),
         body: body.trim() || undefined,
-        url: normalizedUrl || undefined,
+        url: postUrl,
         nsfw: rating === "nsfw",
       }, token);
       toast(`Published to ${selectedCommunity?.title || "your community"}.`, "success");
       setView("feed");
       onPublished(response.post_view);
     } catch (error) {
+      if (uploadedImage?.filename && uploadedImage.deleteToken) {
+        void deleteUploadedImage(instance, uploadedImage.filename, uploadedImage.deleteToken, token).catch(() => undefined);
+      }
       setFormError(error instanceof Error ? error.message : "The post could not be published.");
     } finally {
       setPublishing(false);
@@ -147,9 +184,28 @@ export function PublishPostView({ onPublished }: PublishPostViewProps) {
             <textarea value={body} onChange={(event) => setBody(event.target.value)} rows={7} placeholder="Write the context, question, or story here…" className="mt-3 w-full resize-y bg-transparent text-sm leading-7 text-ink outline-none placeholder:text-muted/45" />
           </label>
 
+          <div className="overflow-hidden rounded-[1.5rem] border border-line bg-panel shadow-soft">
+            {imagePreview ? (
+              <div className="relative">
+                <img src={imagePreview} alt="Selected upload preview" className="max-h-80 w-full bg-canvas object-contain" />
+                <button type="button" onClick={() => setImageFile(null)} disabled={publishing} className="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-black/65 text-white backdrop-blur disabled:opacity-50" aria-label="Remove selected image"><X className="h-5 w-5" /></button>
+                <div className="flex items-center justify-between gap-3 p-4">
+                  <span className="min-w-0 truncate text-xs font-bold text-muted">{imageFile?.name}</span>
+                  <span className="shrink-0 text-[10px] font-bold uppercase tracking-[.12em] text-muted">{imageFile ? `${(imageFile.size / 1024 / 1024).toFixed(1)} MB` : ""}</span>
+                </div>
+              </div>
+            ) : (
+              <label className="flex cursor-pointer items-center gap-3 p-5 transition hover:bg-canvas/60 focus-within:bg-canvas/60">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-canvas text-sprout"><ImagePlus className="h-5 w-5" /></span>
+                <span className="min-w-0 flex-1"><span className="block text-[10px] font-extrabold uppercase tracking-[.18em] text-muted">Picture <span className="normal-case tracking-normal">(optional)</span></span><span className="mt-1 block text-sm font-semibold text-ink">Choose a photo or GIF</span><span className="mt-1 block text-[10px] font-bold text-muted">JPEG, PNG, GIF, WebP, or AVIF · up to 4 MB</span></span>
+                <input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" onChange={handleImageChange} disabled={publishing} className="sr-only" />
+              </label>
+            )}
+          </div>
+
           <label className="flex items-center gap-3 rounded-[1.5rem] border border-line bg-panel p-5 shadow-soft focus-within:border-sprout/70">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-canvas text-sprout"><Link2 className="h-4 w-4" /></span>
-            <span className="min-w-0 flex-1"><span className="block text-[10px] font-extrabold uppercase tracking-[.18em] text-muted">Link <span className="normal-case tracking-normal">(optional)</span></span><input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://…" className="mt-1 w-full bg-transparent text-sm font-semibold text-ink outline-none placeholder:text-muted/45" /></span>
+             <span className="min-w-0 flex-1"><span className="block text-[10px] font-extrabold uppercase tracking-[.18em] text-muted">Link <span className="normal-case tracking-normal">(optional)</span></span><input type="url" value={url} onChange={(event) => setUrl(event.target.value)} disabled={Boolean(imageFile) || publishing} placeholder={imageFile ? "Remove the picture to add a link" : "https://…"} className="mt-1 w-full bg-transparent text-sm font-semibold text-ink outline-none placeholder:text-muted/45 disabled:opacity-60" /></span>
           </label>
 
           {formError && <div role="alert" className="flex items-start gap-3 rounded-2xl border border-flare/35 bg-flare/10 p-4 text-sm font-semibold leading-6 text-flare"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />{formError}</div>}
@@ -169,7 +225,7 @@ export function PublishPostView({ onPublished }: PublishPostViewProps) {
           </fieldset>
 
           <motion.button whileTap={canPublish ? { scale: .98 } : undefined} type="submit" disabled={!canPublish} className="flex w-full items-center justify-center gap-2 rounded-[1.35rem] bg-ink px-5 py-4 text-sm font-extrabold text-panel shadow-card transition disabled:cursor-not-allowed disabled:opacity-35">
-            {publishing ? <><LoaderCircle className="h-5 w-5 animate-spin" />Publishing…</> : <><Send className="h-5 w-5" />Publish post</>}
+            {publishing ? <><LoaderCircle className="h-5 w-5 animate-spin" />{imageFile ? "Uploading and publishing…" : "Publishing…"}</> : <><Send className="h-5 w-5" />Publish post</>}
           </motion.button>
           <p className="text-center text-[10px] font-bold uppercase tracking-[.14em] text-muted/70">Published under your Lemmy identity</p>
         </motion.form>

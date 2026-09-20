@@ -43,7 +43,8 @@ function lemmyProxy(): Plugin {
         const [path, search] = (request.url ?? "").split("?");
         const [, rawInstance = "", rest = ""] = /^\/([^/]+)(\/.*)?$/.exec(path) ?? [];
         const instance = rawInstance.toLowerCase();
-        if (!HOST_PATTERN.test(instance) || !rest.startsWith("/api/")) return next();
+        const imagePath = rest === "/pictrs/image" || rest.startsWith("/pictrs/image/delete/");
+        if (!HOST_PATTERN.test(instance) || (!rest.startsWith("/api/") && !imagePath)) return next();
 
         const headers = new Headers({ "user-agent": "TheHumanNetwork/1.0 (local dev)" });
         ["authorization", "content-type", "accept"].forEach((name) => {

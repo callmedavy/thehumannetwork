@@ -23,6 +23,10 @@ function endpoint(instance: string, path: string, viaProxy: boolean) {
   return viaProxy ? `/api/lemmy/${instance}/api/v3${path}` : `https://${instance}/api/v3${path}`;
 }
 
+function imageEndpoint(instance: string, viaProxy: boolean) {
+  return viaProxy ? `/api/lemmy/${instance}/pictrs/image` : `https://${instance}/pictrs/image`;
+}
+
 async function request<T>(instance: string, path: string, options: RequestOptions = {}): Promise<T> {
   const { token, ...fetchOptions } = options;
   const headers = new Headers(fetchOptions.headers);
@@ -206,6 +210,74 @@ export async function createPost(instance: string, input: { name: string; commun
       auth: token,
     }),
   });
+}
+
+interface ImageUploadResponse {
+  files?: Array<{ file?: string; delete_token?: string }>;
+  url?: string;
+}
+
+export async function uploadImage(instance: string, image: File, token: string) {
+  const form = new FormData();
+  form.append("images[]", image, image.name);
+  const headers = new Headers({
+    Accept: "application/json",
+    Authorization: `Bearer ${token}`,
+  });
+
+  let response: Response | null = null;
+  if (proxyAvailable) {
+    try {
+      const proxied = await fetch(imageEndpoint(instance, true), { method: "POST", headers, body: form });
+      if (proxied.headers.has(PROXY_MARKER)) response = proxied;
+      else proxyAvailable = false;
+    } catch {
+      response = null;
+    }
+  }
+
+  if (!response) {
+    try {
+      response = await fetch(imageEndpoint(instance, false), { method: "POST", headers, body: form });
+    } catch {
+      throw new Error(`Could not upload the image to ${instance}.`);
+    }
+  }
+
+  const payload = await response.json().catch(() => null) as ImageUploadResponse | null;
+  if (!response.ok) throw new Error(getMessage(payload, `Image upload failed with status ${response.status}`));
+
+  const uploadedFile = payload?.files?.[0];
+  const filename = uploadedFile?.file;
+  if (payload?.url) return { url: new URL(payload.url, `https://${instance}`).toString(), filename, deleteToken: uploadedFile?.delete_token };
+  if (!filename) throw new Error("The instance uploaded the image but did not return its address.");
+  return {
+    url: `https://${instance}/pictrs/image/${filename.split("/").map(encodeURIComponent).join("/")}`,
+    filename,
+    deleteToken: uploadedFile.delete_token,
+  };
+}
+
+export async function deleteUploadedImage(instance: string, filename: string, deleteToken: string, token: string) {
+  const path = `/pictrs/image/delete/${encodeURIComponent(deleteToken)}/${filename.split("/").map(encodeURIComponent).join("/")}`;
+  const headers = new Headers({ Authorization: `Bearer ${token}` });
+  for (const method of ["DELETE", "GET"]) {
+    let response: Response | null = null;
+    if (proxyAvailable) {
+      try {
+        const proxied = await fetch(`/api/lemmy/${instance}${path}`, { method, headers });
+        if (proxied.headers.has(PROXY_MARKER)) response = proxied;
+        else proxyAvailable = false;
+      } catch {
+        response = null;
+      }
+    }
+    if (!response) response = await fetch(`https://${instance}${path}`, { method, headers });
+    if (response.ok) return;
+    // pict-rs documents both verbs; some reverse proxies permit only one.
+    if (response.status !== 405) throw new Error(`Could not remove unused upload (${response.status}).`);
+  }
+  throw new Error("Could not remove unused upload.");
 }
 
 export async function listVotedPosts(instance: string, vote: "up" | "down", page: number, token: string) {

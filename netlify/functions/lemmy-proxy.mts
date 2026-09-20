@@ -7,7 +7,7 @@ export const config = {
 const HOST_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/;
 const BLOCKED_HOSTS = /(^|\.)(local|localhost|internal|home|lan)$/;
 const FORWARDED_REQUEST_HEADERS = ["authorization", "content-type", "accept", "accept-language"];
-const UPSTREAM_TIMEOUT_MS = 9_500;
+const UPSTREAM_TIMEOUT_MS = 30_000;
 const USER_AGENT = "TheHumanNetwork/1.0 (+https://thehumannetwork.netlify.app)";
 
 function jsonError(message: string, status: number) {
@@ -31,8 +31,11 @@ function parseTarget(url: URL) {
 
   const instance = (segments.shift() ?? "").toLowerCase();
   if (!HOST_PATTERN.test(instance) || BLOCKED_HOSTS.test(instance)) return null;
-  // Scoped to the Lemmy REST surface so this never becomes a general-purpose proxy.
-  if (segments[0] !== "api") return null;
+  // Scoped to Lemmy's REST API and its authenticated image-upload endpoint.
+  const isApi = segments[0] === "api";
+  const isImageUpload = segments.length === 2 && segments[0] === "pictrs" && segments[1] === "image";
+  const isImageDelete = segments.length === 5 && segments[0] === "pictrs" && segments[1] === "image" && segments[2] === "delete";
+  if (!isApi && !isImageUpload && !isImageDelete) return null;
 
   return `https://${instance}/${segments.map((segment) => encodeURIComponent(segment)).join("/")}${url.search}`;
 }
@@ -52,7 +55,7 @@ export default async (req: Request) => {
     upstream = await fetch(target, {
       method: req.method,
       headers,
-      body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.text(),
+      body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer(),
       redirect: "follow",
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
@@ -62,7 +65,7 @@ export default async (req: Request) => {
   }
 
   const contentType = upstream.headers.get("content-type") ?? "";
-  const body = await upstream.text();
+  const body = await upstream.arrayBuffer();
 
   // Cloudflare-style challenge pages come back as HTML; turn them into a message the UI can show.
   if (!contentType.includes("json") && !upstream.ok) {
