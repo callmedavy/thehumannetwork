@@ -23,8 +23,8 @@ const storage = {
 const storedFilters = storage.get<Partial<Filters>>("swimmey:filters", {});
 const initialFilters: Filters = {
   scope: storedFilters.scope === "Subscribed" ? "Subscribed" : "All",
-  order: storedFilters.order === "comments" || storedFilters.order === "contested" ? storedFilters.order : "top",
-  date: storedFilters.date === "week" || storedFilters.date === "month" || storedFilters.date === "year" || storedFilters.date === "all" ? storedFilters.date : "today",
+  order: storedFilters.order === "comments" || storedFilters.order === "contested" || storedFilters.order === "newest" ? storedFilters.order : "top",
+  date: storedFilters.date === "threeDays" || storedFilters.date === "week" || storedFilters.date === "month" || storedFilters.date === "year" || storedFilters.date === "all" ? storedFilters.date : "today",
 };
 
 const storedTheme = storage.get<string>("swimmey:theme", "forest");

@@ -8,10 +8,12 @@ const orderOptions: Array<{ value: Filters["order"]; label: string }> = [
   { value: "top", label: "Most upvotes" },
   { value: "comments", label: "Most commented" },
   { value: "contested", label: "Most contested" },
+  { value: "newest", label: "Newest" },
 ];
 
 const dateOptions: Array<{ value: Filters["date"]; label: string }> = [
   { value: "today", label: "Today" },
+  { value: "threeDays", label: "Past 3 days" },
   { value: "week", label: "Last week" },
   { value: "month", label: "Past month" },
   { value: "year", label: "Past year" },
@@ -49,7 +51,7 @@ export function FilterSheet() {
             </div>
             <div className="mt-7 space-y-7">
               <fieldset><legend className="mb-3 text-xs font-extrabold uppercase tracking-[.14em] text-muted">Scope</legend><div className="flex flex-wrap gap-2"><Pill active={draft.scope === "All"} onClick={() => setDraft({ ...draft, scope: "All" })}>Everything</Pill><Pill active={draft.scope === "Subscribed"} disabled={!token} onClick={() => setDraft({ ...draft, scope: "Subscribed" })}>Subscribed</Pill></div></fieldset>
-              <fieldset><legend className="mb-3 text-xs font-extrabold uppercase tracking-[.14em] text-muted">Sort high to low</legend><div className="flex flex-wrap gap-2">{orderOptions.map((option) => <Pill key={option.value} active={draft.order === option.value} onClick={() => setDraft({ ...draft, order: option.value })}>{option.label}</Pill>)}</div></fieldset>
+              <fieldset><legend className="mb-3 text-xs font-extrabold uppercase tracking-[.14em] text-muted">Sort by</legend><div className="flex flex-wrap gap-2">{orderOptions.map((option) => <Pill key={option.value} active={draft.order === option.value} onClick={() => setDraft({ ...draft, order: option.value })}>{option.label}</Pill>)}</div></fieldset>
               <fieldset><legend className="mb-3 text-xs font-extrabold uppercase tracking-[.14em] text-muted">Date posted</legend><div className="flex flex-wrap gap-2">{dateOptions.map((option) => <Pill key={option.value} active={draft.date === option.value} onClick={() => setDraft({ ...draft, date: option.value })}>{option.label}</Pill>)}</div></fieldset>
             </div>
             <button type="button" onClick={() => setFilters(draft)} className="mt-8 h-14 w-full rounded-2xl bg-ink text-sm font-extrabold text-panel transition active:scale-[.98]">Apply to feed</button>

@@ -80,7 +80,9 @@ export async function login(instance: string, username: string, password: string
 }
 
 function resolveSort(filters: Filters) {
+  if (filters.order === "newest") return "New";
   if (filters.date === "today") return "TopDay";
+  if (filters.date === "threeDays") return "TopWeek";
   if (filters.date === "week") return "TopWeek";
   if (filters.date === "month") return "TopMonth";
   if (filters.date === "year") return "TopYear";
@@ -90,8 +92,19 @@ function resolveSort(filters: Filters) {
 }
 
 function sortPosts(posts: PostView[], filters: Filters) {
-  if (filters.date === "all" || filters.order === "top") return posts;
-  return [...posts].sort((first, second) => {
+  const rangeDays = filters.date === "today" ? 1
+    : filters.date === "threeDays" ? 3
+      : filters.date === "week" ? 7
+        : filters.date === "month" ? 30
+          : filters.date === "year" ? 365
+            : null;
+  const shouldFilterLocally = filters.order === "newest" || filters.date === "threeDays";
+  const filteredPosts = shouldFilterLocally && rangeDays !== null
+    ? posts.filter((post) => new Date(post.post.published).getTime() >= Date.now() - rangeDays * 24 * 60 * 60 * 1000)
+    : posts;
+  if (filters.order === "top") return filteredPosts;
+  return [...filteredPosts].sort((first, second) => {
+    if (filters.order === "newest") return new Date(second.post.published).getTime() - new Date(first.post.published).getTime();
     if (filters.order === "comments") return second.counts.comments - first.counts.comments;
     const firstRatio = first.counts.upvotes / Math.max(first.counts.downvotes, 1);
     const secondRatio = second.counts.upvotes / Math.max(second.counts.downvotes, 1);
