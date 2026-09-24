@@ -17,9 +17,9 @@ export function ActionRail({
   canAdvance?: boolean;
 }) {
   const centerEnabled = canMarkRead || canAdvance;
-  const centerLabel = canMarkRead ? "Mark Read" : "Next";
+  const centerLabel = canMarkRead ? "Pass" : "Next";
   const centerAria = canMarkRead
-    ? "Mark post as read and show next post"
+    ? "Pass this post, mark it as read, and show the next post"
     : "Skip to next post";
 
   return (

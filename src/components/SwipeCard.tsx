@@ -131,7 +131,7 @@ export function SwipeCard({ post, depth, active, canVote, canMarkRead, canAdvanc
           </motion.div>
           <motion.div style={{ opacity: downGlow }} className="pointer-events-none absolute inset-0 z-30 flex items-start justify-center rounded-[1.75rem] border-[3px] border-ink/70 bg-ink/10 pt-8 shadow-[inset_0_0_80px_rgb(var(--ink)/.2)]">
             {downEnabled && dragDirection === "down" && (
-              <span className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-extrabold uppercase tracking-[.16em] text-panel shadow-soft"><Check className="h-4 w-4" /> {canMarkRead ? "Mark read" : "Next"}</span>
+              <span className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-extrabold uppercase tracking-[.16em] text-panel shadow-soft"><Check className="h-4 w-4" /> {canMarkRead ? "Pass" : "Next"}</span>
             )}
           </motion.div>
         </>
