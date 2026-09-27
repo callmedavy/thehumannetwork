@@ -208,8 +208,8 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
   }
 
   return (
-    <main className="relative flex h-[100dvh] flex-col overflow-hidden">
-      <header className="safe-top fixed inset-x-0 top-0 z-30 border-b border-line/70 bg-canvas/75 px-4 pb-3 backdrop-blur-xl">
+    <main className="relative flex h-full min-h-0 flex-col overflow-hidden">
+      <header className="safe-top relative z-30 shrink-0 border-b border-line/70 bg-canvas/75 px-4 pb-3 backdrop-blur-xl">
         <div className="mx-auto flex max-w-xl items-center justify-between">
           <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[.2em] text-muted">My Host</p><p className="max-w-[8rem] truncate text-[11px] font-extrabold uppercase tracking-[.12em]">{instance}</p></div>
           <BrandMark compact />
@@ -217,7 +217,7 @@ export function FeedScreen({ onOpenPost, votedPostId }: { onOpenPost: (post: Pos
         </div>
       </header>
 
-      <div className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col overflow-hidden px-4 pb-5 pt-[5.8rem] safe-bottom">
+      <div className="safe-bottom mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col overflow-hidden px-4 pt-4">
         <div className="relative mx-auto min-h-0 w-full flex-1 max-w-[27rem]">
           {loading ? <LoadingScreen label="Loading feed" className="absolute inset-0" /> : current ? visibleQueue.slice(0, 3).map((post, index) => (
             <SwipeCard key={post.post.id} post={post} alsoPostedIn={crossPosts[post.post.id]} depth={index} active={index === 0} canVote={Boolean(token)} canMarkRead={Boolean(token)} canAdvance={!token} onSwipe={finalizeSwipe} onOpen={() => onOpenPost(post)} />

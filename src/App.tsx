@@ -47,7 +47,7 @@ export default function App() {
   if (!initialized) return <LoadingScreen label="Starting The Human Network" className="min-h-[100dvh] bg-canvas px-4" />;
 
   return (
-    <div className="app-shell grain min-h-[100dvh] bg-canvas text-ink">
+    <div className={`app-shell grain bg-canvas text-ink${instance && view === "feed" ? " app-shell--feed" : ""}`}>
       {!instance ? (authMode === "home" ? <HomeScreen onGetStarted={() => useAppStore.getState().browse("lemmy.world")} onLogin={() => setAuthMode("login")} /> : <LoginScreen onBack={() => setAuthMode("home")} />) : (
         <>
           {view === "feed" && <FeedScreen onOpenPost={setSelectedPost} votedPostId={votedPostId} />}

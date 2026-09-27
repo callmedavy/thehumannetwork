@@ -1,0 +1,1 @@
+- [Mobile scrolling intent](mobile-scrolling.md) — preserve a stationary feed without disabling scrolling needed to read long content.
