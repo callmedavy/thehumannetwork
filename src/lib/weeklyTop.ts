@@ -24,11 +24,16 @@ export interface WeekWindow {
 export const WEEKLY_TOP_SIZE = 10;
 
 /**
- * How many finished weeks the picker offers. Each one costs at least one request to open and up
- * to `WEEKLY_TOP_MAX_PAGES` for the older ones, so the list is deliberately a quarter rather
- * than all of history.
+ * How many finished weeks the picker offers — a year.
+ *
+ * The picker itself is free: it is computed from the clock, and a week is not fetched until it is
+ * opened. So the length of this list is a question about the charts behind it, not about cost.
+ * Measured on lemmy.world: a week inside the last month resolves in one request; weeks back to a
+ * year usually resolve in 7 to 16; a week older than a year drops into the all-time ranking, where
+ * 16 pages of digging surfaced only one to nine of its posts. A year is where the chart still says
+ * something true, which is why the list stops there.
  */
-export const WEEKLY_TOP_WEEKS_OFFERED = 12;
+export const WEEKLY_TOP_WEEKS_OFFERED = 52;
 
 export function startOfWeek(date: Date) {
   const start = new Date(date);

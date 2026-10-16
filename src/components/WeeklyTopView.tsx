@@ -7,9 +7,19 @@ import { WEEKLY_TOP_SIZE, WEEKLY_TOP_WEEKS_OFFERED, completedWeeks, formatWeekLa
 import { useAppStore } from "../store/useAppStore";
 import { LoadingScreen } from "./LoadingScreen";
 
+/** Which instances stood behind the chart, and which fell short of it. */
+interface Coverage {
+  sources: string[];
+  capped: string[];
+  interrupted: string[];
+  silent: string[];
+}
+
+const EMPTY_COVERAGE: Coverage = { sources: [], capped: [], interrupted: [], silent: [] };
+
 /**
- * Two stages in one screen: the picker (finished weeks, no network) and the chart for the week
- * the reader picked. Keeping them in one component is what makes the back arrow mean "up one
+ * Two stages in one screen: the picker (finished weeks, no network at all) and the chart for the
+ * week the reader picked. Keeping them in one component is what makes the back arrow mean "up one
  * stage" instead of a round trip through the feed.
  */
 export function WeeklyTopView({ onOpenPost }: { onOpenPost: (post: PostView) => void }) {
@@ -25,10 +35,10 @@ export function WeeklyTopView({ onOpenPost }: { onOpenPost: (post: PostView) => 
   const [selected, setSelected] = useState<WeekWindow | null>(null);
   const [posts, setPosts] = useState<PostView[]>([]);
   const [loading, setLoading] = useState(false);
-  const [pagesScanned, setPagesScanned] = useState(0);
-  const [capped, setCapped] = useState(false);
-  // An older week takes a dozen and a half requests; picking a second week mid-flight must not
-  // let the first week's pages land in the second week's chart.
+  const [progress, setProgress] = useState({ pages: 0, sources: 0 });
+  const [coverage, setCoverage] = useState<Coverage>(EMPTY_COVERAGE);
+  // Weeks inside the last month answer on the first page; an older one takes a dozen and a half,
+  // so picking a second week mid-flight must not land the first week's pages in the second chart.
   const generation = useRef(0);
 
   useEffect(() => () => { generation.current += 1; }, []);
@@ -38,8 +48,8 @@ export function WeeklyTopView({ onOpenPost }: { onOpenPost: (post: PostView) => 
     const mine = generation.current;
     setSelected(week);
     setPosts([]);
-    setPagesScanned(0);
-    setCapped(false);
+    setProgress({ pages: 0, sources: 0 });
+    setCoverage(EMPTY_COVERAGE);
     setLoading(true);
     try {
       const result = await listWeeklyTopPosts(instance, week, {
@@ -47,12 +57,16 @@ export function WeeklyTopView({ onOpenPost }: { onOpenPost: (post: PostView) => 
         collapseCrossPosts,
         // Pages arrive over a few seconds for an older week, so the chart fills in as they land
         // rather than showing a spinner for the whole walk.
-        onProgress: (running) => { if (generation.current === mine) setPosts(running); },
+        onProgress: (running, walked) => {
+          if (generation.current !== mine) return;
+          setPosts(running);
+          setProgress(walked);
+        },
       });
       if (generation.current !== mine) return;
       setPosts(result.posts);
-      setPagesScanned(result.pagesScanned);
-      setCapped(result.capped);
+      setProgress({ pages: result.pagesScanned, sources: result.sources.length });
+      setCoverage({ sources: result.sources, capped: result.capped, interrupted: result.interrupted, silent: result.silent });
     } catch (error) {
       if (generation.current !== mine) return;
       toast(error instanceof Error ? error.message : "Could not load that week's posts.", "error");
@@ -70,20 +84,22 @@ export function WeeklyTopView({ onOpenPost }: { onOpenPost: (post: PostView) => 
   }, []);
 
   const label = selected ? formatWeekLabel(selected) : "";
+  const scanned = progress.pages * WEEKLY_TOP_PAGE_SIZE;
+  const readCount = coverage.sources.length + coverage.silent.length;
 
   return (
     <main className="min-h-[100dvh]">
       <header className="safe-top sticky top-0 z-20 border-b border-line/70 bg-canvas/80 px-4 pb-3 backdrop-blur-xl">
         <div className="mx-auto flex max-w-3xl items-center justify-between">
           <button type="button" onClick={() => (selected ? backToWeeks() : setView("feed"))} className="rounded-full p-2.5 text-muted hover:bg-panel hover:text-ink" aria-label={selected ? "Back to the week list" : "Back to feed"}><ArrowLeft className="h-5 w-5" /></button>
-          <div className="min-w-0 px-2 text-center"><p className="text-[9px] font-extrabold uppercase tracking-[.2em] text-muted">{selected ? "Weekly Top 10" : `Top posts on ${instance}`}</p><h1 className={`font-display ${selected ? "text-xl sm:text-2xl" : "text-2xl"}`}>{selected ? label : "Weekly Top 10"}</h1></div>
+          <div className="min-w-0 px-2 text-center"><p className="text-[9px] font-extrabold uppercase tracking-[.2em] text-muted">{selected ? "Weekly Top 10" : "Across the fediverse"}</p><h1 className={`font-display ${selected ? "text-xl sm:text-2xl" : "text-2xl"}`}>{selected ? label : "Weekly Top 10"}</h1></div>
           <button type="button" onClick={() => setMenuOpen(true)} className="rounded-full p-2.5 text-muted hover:bg-panel hover:text-ink" aria-label="Open menu"><Menu className="h-5 w-5" /></button>
         </div>
       </header>
 
       {!selected && (
         <section className="mx-auto w-full max-w-3xl px-4 py-6 safe-bottom">
-          <p className="mb-5 text-sm leading-relaxed text-muted">Weeks run Sunday to Saturday, in your own timezone. Open a finished week to see the ten posts its readers voted up hardest.</p>
+          <p className="mb-5 text-sm leading-relaxed text-muted">Weeks run Sunday to Saturday, in your own timezone. Nothing is fetched until you open one, and each chart is merged from your instance plus four large ones — no single instance sees the whole network.</p>
           <ul className="space-y-2">
             {weeks.map((week) => (
               <li key={week.key}>
@@ -118,12 +134,14 @@ export function WeeklyTopView({ onOpenPost }: { onOpenPost: (post: PostView) => 
                   );
                 })}
               </ol>
-              {loading && <p className="mt-4 flex items-center justify-center gap-2 text-xs font-bold text-muted"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />Scanned {pagesScanned * WEEKLY_TOP_PAGE_SIZE} posts, still ranking</p>}
-              {!loading && posts.length < WEEKLY_TOP_SIZE && <p className="mt-4 text-center text-xs leading-relaxed text-muted">Only {posts.length} {posts.length === 1 ? "post" : "posts"} from this week turned up in the ranking.</p>}
-              {!loading && capped && <p className="mt-4 text-center text-xs leading-relaxed text-muted">Read from the instance's top {pagesScanned * WEEKLY_TOP_PAGE_SIZE} posts by score. Lemmy has no query for one calendar week, so a lower-scoring post from this week could sit beneath that line — weeks further back need a deeper scan.</p>}
+              {loading && <p className="mt-4 flex items-center justify-center gap-2 text-xs font-bold text-muted"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />Scanned {scanned} posts across {progress.sources} {progress.sources === 1 ? "instance" : "instances"}</p>}
+              {!loading && posts.length < WEEKLY_TOP_SIZE && <p className="mt-4 text-center text-xs leading-relaxed text-muted">Only {posts.length} {posts.length === 1 ? "post" : "posts"} from this week turned up.</p>}
+              {!loading && coverage.capped.length > 0 && <p className="mt-4 text-center text-xs leading-relaxed text-muted">The scan hit its limit on {coverage.capped.join(", ")} after {scanned} posts each, so a lower-scoring post from this week could sit below it.</p>}
+              {!loading && coverage.interrupted.length > 0 && <p className="mt-4 text-center text-xs leading-relaxed text-muted">{coverage.interrupted.join(", ")} stopped answering partway through the scan.</p>}
+              {!loading && coverage.silent.length > 0 && <p className="mt-4 text-center text-xs leading-relaxed text-muted">{coverage.silent.join(", ")} did not answer, so {coverage.sources.length} of {readCount} instances are counted here.</p>}
             </>
           ) : (
-            <div className="grid min-h-[65dvh] place-items-center text-center"><div><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-panel shadow-soft"><Trophy className="h-7 w-7 text-muted" /></span><h2 className="mt-5 font-display text-3xl">Nothing ranked that week.</h2><p className="mt-2 text-sm text-muted">No post from {label} reached {instance}&rsquo;s top posts.</p><button type="button" onClick={backToWeeks} className="mt-5 rounded-xl bg-ink px-5 py-3 text-xs font-extrabold text-panel">Back to the weeks</button></div></div>
+            <div className="grid min-h-[65dvh] place-items-center text-center"><div><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-panel shadow-soft"><Trophy className="h-7 w-7 text-muted" /></span><h2 className="mt-5 font-display text-3xl">Nothing ranked that week.</h2><p className="mt-2 text-sm text-muted">No post from {label} reached the top posts of the instances read.</p><button type="button" onClick={backToWeeks} className="mt-5 rounded-xl bg-ink px-5 py-3 text-xs font-extrabold text-panel">Back to the weeks</button></div></div>
           )}
         </section>
       )}
