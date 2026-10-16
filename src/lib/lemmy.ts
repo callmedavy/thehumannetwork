@@ -328,96 +328,132 @@ export async function listSavedPosts(instance: string, page: number, token: stri
 export const WEEKLY_TOP_PAGE_SIZE = 50;
 
 /**
- * Hard ceiling on pages fetched for a single week.
+ * The instances the chart reads as vantage points on the fediverse.
  *
- * Measured against lemmy.world (0.19.19) while building this: the most recent finished week
- * converges on page 1 — one request — while a week two months back needed 15 pages, about six
- * seconds. Sixteen covers the picker's twelve weeks on an instance that size. Reaching the cap
- * means the ranking was never *proven* complete, so `capped` carries that up to the view instead
- * of letting an unfinished chart pass for the week's top ten.
+ * Lemmy has no global index and no cross-instance tally: every question is asked of one instance,
+ * and an instance only knows what it has federated. So one instance's `All` feed is *its* view,
+ * not the network's. Measured before this list was written: 44 of the 50 top posts of a month on
+ * lemmy.world were in communities lemmy.world itself hosts, and of the posts any two instances
+ * both knew about, every one disagreed on the score — lemmy.ml lagging ~150 points on a
+ * 2,400-point post. Reading several and merging them on `post.ap_id`, the fediverse-wide identity
+ * of a post (the same key `lib/readSet.ts` uses), is the only honest way to answer "most upvoted
+ * across instances".
+ *
+ * These four were checked reachable and answering the v3 API before being listed, and are picked
+ * for size and for the spread of what they see. The reader's own instance joins them, so a chart
+ * read from a quiet instance still carries that instance's corner of the network. This is the cost
+ * knob: one walk per instance per week.
+ */
+export const WEEKLY_TOP_VANTAGE_POINTS = ["lemmy.world", "lemmy.ml", "midwest.social", "discuss.tchncs.de"];
+
+/**
+ * Hard ceiling on pages fetched from each vantage point for one week.
+ *
+ * Measured against lemmy.world while building this: a week inside the last month converges on page
+ * 1 — one request, under a second. Weeks inside the last year usually converge in 7 to 16 pages.
+ * A week older than that falls into the all-time ranking, which is so much wider that 16 pages
+ * surfaced only one to nine of its posts, so the picker stops at a year. Reaching this cap means
+ * the ranking was never *proven* complete, which the chart says out loud.
  */
 export const WEEKLY_TOP_MAX_PAGES = 16;
 
 export interface WeeklyTopResult {
   posts: PostView[];
+  /** Pages read across every vantage point, not per source. */
   pagesScanned: number;
-  /** True when the page cap was reached before the top ten could be proven complete. */
+  /** Vantage points that answered with at least one page. */
+  sources: string[];
+  /** Vantage points that reached the page cap without proving their top ten. */
+  capped: string[];
+  /** Vantage points that stopped answering partway through the scan. */
+  interrupted: string[];
+  /** Vantage points that never answered: a dead host, a rate limit, a block, a typo. */
+  silent: string[];
+}
+
+interface WeeklyTopWalk {
+  instance: string;
+  posts: PostView[];
+  pages: number;
   capped: boolean;
+  interrupted: boolean;
+  answered: boolean;
+  error?: unknown;
+}
+
+// Highest score first; upvotes then recency settle ties so the order holds steady between pages.
+function rankPostsByScore(first: PostView, second: PostView) {
+  return second.counts.score - first.counts.score
+    || second.counts.upvotes - first.counts.upvotes
+    || new Date(second.post.published).getTime() - new Date(first.post.published).getTime();
 }
 
 /**
- * The top posts of one finished calendar week, ranked by score.
+ * One instance's contribution: the top posts of a finished calendar week, ranked by score.
  *
- * Lemmy v3 has no query for "one calendar week" — no `from`/`to`, and its `TopWeek` sort means
- * the seven days before *now* (see `weeklyTopSort`). So this walks the instance's top-sort
- * ranking, `TopMonth` or `TopYear` or `TopAll` depending on how far back the week is, and keeps
- * the posts published inside it. Two things make that exact rather than a hopeful sample:
+ * Lemmy v3 has no query for "one calendar week" — no `from`/`to`, and its `TopWeek` sort means the
+ * seven days before *now* (see `weeklyTopSort`). So this walks the instance's top-sort ranking —
+ * `TopMonth`, `TopYear` or `TopAll`, whichever window contains the week — and keeps the posts
+ * published inside it. Two things make that exact rather than a hopeful sample:
  *
  * - Lemmy orders these rankings by score descending, so the lowest score on the last page is the
  *   highest score anything still unfetched could reach. Once ten of the week's posts are in hand
- *   and the tenth beats that floor, no unseen post can displace it and the walk stops early. The
- *   most recent finished week is normally answered by the first request.
- * - Posts rank by `score` (upvotes minus downvotes) rather than raw upvotes, because score is what
- *   the instance orders by and what every other surface in this app shows as "points". A tie can
- *   settle a place either way.
+ *   and the tenth beats that floor, no unseen post can displace it, and the walk stops early.
+ * - Posts rank by `score` (upvotes minus downvotes), because score is what the instance orders by
+ *   and what every other surface in this app shows as "points". A tie can settle a place either way.
  *
- * `type_=All` rather than the reader's own scope: a weekly chart that changed shape with your
- * subscriptions would not be a chart of the instance.
+ * A page that fails does not throw away the pages already read. An instance will rate-limit a deep
+ * scan — 503s showed up after a few hundred rapid requests while this was being measured — and half
+ * a chart with a note on it beats a spinner that ends in an error toast.
  */
-export async function listWeeklyTopPosts(
+async function walkWeekOnInstance(
   instance: string,
   week: WeekWindow,
   options: {
     token?: string | null;
-    size?: number;
-    /** Honours the cross-post setting: ten slots must not go to one link three times over. */
+    size: number;
+    maxPages: number;
     collapseCrossPosts?: boolean;
-    maxPages?: number;
-    /** Called after each page with the running chart, so a slow week fills in instead of hanging. */
-    onProgress?: (posts: PostView[]) => void;
-  } = {},
-): Promise<WeeklyTopResult> {
-  const size = options.size ?? WEEKLY_TOP_SIZE;
-  const maxPages = options.maxPages ?? WEEKLY_TOP_MAX_PAGES;
+    onPage?: (instance: string, pool: PostView[]) => void;
+  },
+): Promise<WeeklyTopWalk> {
+  const { size, maxPages } = options;
   const sort = weeklyTopSort(week);
 
-  // Highest score first; upvotes then recency settle ties so the order holds steady between pages.
-  const rankFirst = (first: PostView, second: PostView) =>
-    second.counts.score - first.counts.score
-    || second.counts.upvotes - first.counts.upvotes
-    || new Date(second.post.published).getTime() - new Date(first.post.published).getTime();
-
   let pool: PostView[] = [];
-  const poolIds = new Set<number>();
+  const seenIds = new Set<number>();
   const crossPostOwners = new Set<string>();
 
   const absorb = (posts: PostView[]) => {
     let grew = false;
     posts.forEach((post) => {
-      if (poolIds.has(post.post.id)) return;
+      if (seenIds.has(post.post.id)) return;
       if (options.collapseCrossPosts) {
         const key = crossPostKey(post);
         // `pool` stays sorted, so the copy met first — the highest scoring one — is the copy that
         // keeps the slot; the rest are recorded so they cannot come back on a later page.
         if (key && crossPostOwners.has(key)) {
-          poolIds.add(post.post.id);
+          seenIds.add(post.post.id);
           return;
         }
         if (key) crossPostOwners.add(key);
       }
-      poolIds.add(post.post.id);
+      seenIds.add(post.post.id);
       pool = [...pool, post];
       grew = true;
     });
-    if (grew) pool.sort(rankFirst);
+    if (grew) pool.sort(rankPostsByScore);
   };
 
   let cursor: string | null = null;
   let pageNumber = 1;
-  let pagesScanned = 0;
+  let pages = 0;
   let capped = false;
+  let interrupted = false;
+  let answered = false;
+  let error: unknown;
 
-  while (pagesScanned < maxPages) {
+  while (pages < maxPages) {
     const params = new URLSearchParams({ type_: "All", sort, limit: String(WEEKLY_TOP_PAGE_SIZE) });
     const known = cursorSupport.get(instance);
     const useCursor = Boolean(cursor) && known !== false;
@@ -429,15 +465,23 @@ export async function listWeeklyTopPosts(
     if (useCursor) params.set("page_cursor", cursor!);
     else params.set("page", String(pageNumber));
 
-    const data = await request<{ posts?: PostView[]; next_page?: string | null }>(instance, `/post/list?${params}`, { token: options.token });
-    pagesScanned += 1;
+    let data: { posts?: PostView[]; next_page?: string | null };
+    try {
+      data = await request<{ posts?: PostView[]; next_page?: string | null }>(instance, `/post/list?${params}`, { token: options.token });
+    } catch (caught) {
+      error = caught;
+      interrupted = answered;
+      break;
+    }
 
+    pages += 1;
+    answered = true;
     const batch = data.posts ?? [];
     const floor = batch.reduce((lowest, post) => Math.min(lowest, post.counts.score), Number.POSITIVE_INFINITY);
     absorb(batch.filter((post) => isWithinWeek(post.post.published, week)));
-    options.onProgress?.(pool.slice(0, size));
+    options.onPage?.(instance, pool);
 
-    // Proven complete: nothing further down the ranking can beat the tenth post already in hand.
+    // Proven complete: nothing further down this ranking can beat the tenth post already in hand.
     if (pool.length >= size && pool[size - 1].counts.score >= floor) break;
 
     const nextCursor = typeof data.next_page === "string" && data.next_page ? data.next_page : null;
@@ -451,12 +495,102 @@ export async function listWeeklyTopPosts(
       pageNumber += 1;
     }
 
-    // The ranking ran out, so the walk has seen every post in its window: nothing was missed.
+    // The ranking ran out, so this source has been read to its end: nothing there was missed.
     if (!nextCursor && batch.length < WEEKLY_TOP_PAGE_SIZE) break;
-    if (pagesScanned === maxPages) capped = true;
+    if (pages === maxPages) capped = true;
   }
 
-  return { posts: pool.slice(0, size), pagesScanned, capped };
+  return { instance, posts: pool.slice(0, size), pages, capped, interrupted, answered, error };
+}
+
+/**
+ * The top posts of one finished calendar week, merged across several instances.
+ *
+ * Each vantage point is walked independently and each is entitled to stop on its own proof, which
+ * merging cannot undermine: a source stops only once its own tenth post beats its own last page's
+ * floor, so every post it did not fetch scores at or below a post the merged pool already holds —
+ * nothing unfetched can reach the merged top ten. For the same reason each source only has to
+ * contribute its own top ten, not the whole week.
+ *
+ * Where two instances report the same post (`post.ap_id`), the higher score wins: vote counts
+ * converge across the fediverse and instances lag one another, so the larger number is the less
+ * stale one. Cross-post collapsing then runs once more over the union, because the same link
+ * posted to two communities is two posts with two ap_ids.
+ */
+export async function listWeeklyTopPosts(
+  instance: string,
+  week: WeekWindow,
+  options: {
+    token?: string | null;
+    size?: number;
+    /** Honours the cross-post setting: ten slots must not go to one link three times over. */
+    collapseCrossPosts?: boolean;
+    maxPages?: number;
+    /** Overrides the built-in vantage points; the reader's own instance is always included. */
+    vantagePoints?: string[];
+    /** Called after each page with the running chart, so a slow week fills in instead of hanging. */
+    onProgress?: (posts: PostView[], progress: { pages: number; sources: number }) => void;
+  } = {},
+): Promise<WeeklyTopResult> {
+  const size = options.size ?? WEEKLY_TOP_SIZE;
+  const maxPages = options.maxPages ?? WEEKLY_TOP_MAX_PAGES;
+  const vantagePoints = Array.from(new Set([instance, ...(options.vantagePoints ?? WEEKLY_TOP_VANTAGE_POINTS)].filter(Boolean)));
+
+  const live = new Map<string, PostView[]>();
+  let pagesRead = 0;
+
+  const merge = () => {
+    const byPost = new Map<string, PostView>();
+    vantagePoints.forEach((source) => {
+      (live.get(source) ?? []).forEach((post) => {
+        // `ap_id` is the post's identity across the whole fediverse; the instance-scoped fallback
+        // only covers a malformed payload, and deliberately cannot collide with another instance.
+        const key = post.post.ap_id || `${source}#${post.post.id}`;
+        const existing = byPost.get(key);
+        if (!existing || post.counts.score > existing.counts.score) byPost.set(key, post);
+      });
+    });
+    const ranked = Array.from(byPost.values()).sort(rankPostsByScore);
+    if (!options.collapseCrossPosts) return ranked.slice(0, size);
+
+    const kept: PostView[] = [];
+    const owners = new Set<string>();
+    ranked.forEach((post) => {
+      const key = crossPostKey(post);
+      if (key && owners.has(key)) return;
+      if (key) owners.add(key);
+      kept.push(post);
+    });
+    return kept.slice(0, size);
+  };
+
+  const walks = await Promise.all(vantagePoints.map((source) => walkWeekOnInstance(source, week, {
+    token: options.token,
+    size,
+    maxPages,
+    collapseCrossPosts: options.collapseCrossPosts,
+    onPage: (walked, pool) => {
+      live.set(walked, pool);
+      pagesRead += 1;
+      options.onProgress?.(merge(), { pages: pagesRead, sources: live.size });
+    },
+  })));
+
+  if (!walks.some((walk) => walk.answered)) {
+    const failure = walks.find((walk) => walk.error)?.error;
+    throw failure instanceof Error ? failure : new Error(`Could not reach ${vantagePoints[0]}.`);
+  }
+
+  walks.forEach((walk) => live.set(walk.instance, walk.posts));
+
+  return {
+    posts: merge(),
+    pagesScanned: walks.reduce((total, walk) => total + walk.pages, 0),
+    sources: walks.filter((walk) => walk.answered).map((walk) => walk.instance),
+    capped: walks.filter((walk) => walk.capped).map((walk) => walk.instance),
+    interrupted: walks.filter((walk) => walk.interrupted).map((walk) => walk.instance),
+    silent: walks.filter((walk) => !walk.answered).map((walk) => walk.instance),
+  };
 }
 
 export const USER_POSTS_PAGE_SIZE = 20;
