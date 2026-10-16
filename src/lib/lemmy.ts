@@ -1,4 +1,6 @@
 import type { AccountNotification, CommentView, Community, Filters, LemmyComment, LemmyPost, Person, PostView } from "../types";
+import { crossPostKey } from "./format";
+import { WEEKLY_TOP_SIZE, isWithinWeek, weeklyTopSort, type WeekWindow } from "./weeklyTop";
 
 interface RequestOptions extends RequestInit {
   token?: string | null;
@@ -236,6 +238,140 @@ export async function listSavedPosts(instance: string, page: number, token: stri
   });
   const data = await request<{ posts: PostView[] }>(instance, `/post/list?${params}`, { token });
   return data.posts;
+}
+
+export const WEEKLY_TOP_PAGE_SIZE = 50;
+
+/**
+ * Hard ceiling on pages fetched for a single week.
+ *
+ * Measured against lemmy.world (0.19.19) while building this: the most recent finished week
+ * converges on page 1 — one request — while a week two months back needed 15 pages, about six
+ * seconds. Sixteen covers the picker's twelve weeks on an instance that size. Reaching the cap
+ * means the ranking was never *proven* complete, so `capped` carries that up to the view instead
+ * of letting an unfinished chart pass for the week's top ten.
+ */
+export const WEEKLY_TOP_MAX_PAGES = 16;
+
+export interface WeeklyTopResult {
+  posts: PostView[];
+  pagesScanned: number;
+  /** True when the page cap was reached before the top ten could be proven complete. */
+  capped: boolean;
+}
+
+/**
+ * The top posts of one finished calendar week, ranked by score.
+ *
+ * Lemmy v3 has no query for "one calendar week" — no `from`/`to`, and its `TopWeek` sort means
+ * the seven days before *now* (see `weeklyTopSort`). So this walks the instance's top-sort
+ * ranking, `TopMonth` or `TopYear` or `TopAll` depending on how far back the week is, and keeps
+ * the posts published inside it. Two things make that exact rather than a hopeful sample:
+ *
+ * - Lemmy orders these rankings by score descending, so the lowest score on the last page is the
+ *   highest score anything still unfetched could reach. Once ten of the week's posts are in hand
+ *   and the tenth beats that floor, no unseen post can displace it and the walk stops early. The
+ *   most recent finished week is normally answered by the first request.
+ * - Posts rank by `score` (upvotes minus downvotes) rather than raw upvotes, because score is what
+ *   the instance orders by and what every other surface in this app shows as "points". A tie can
+ *   settle a place either way.
+ *
+ * `type_=All` rather than the reader's own scope: a weekly chart that changed shape with your
+ * subscriptions would not be a chart of the instance.
+ */
+export async function listWeeklyTopPosts(
+  instance: string,
+  week: WeekWindow,
+  options: {
+    token?: string | null;
+    size?: number;
+    /** Honours the cross-post setting: ten slots must not go to one link three times over. */
+    collapseCrossPosts?: boolean;
+    maxPages?: number;
+    /** Called after each page with the running chart, so a slow week fills in instead of hanging. */
+    onProgress?: (posts: PostView[]) => void;
+  } = {},
+): Promise<WeeklyTopResult> {
+  const size = options.size ?? WEEKLY_TOP_SIZE;
+  const maxPages = options.maxPages ?? WEEKLY_TOP_MAX_PAGES;
+  const sort = weeklyTopSort(week);
+
+  // Highest score first; upvotes then recency settle ties so the order holds steady between pages.
+  const rankFirst = (first: PostView, second: PostView) =>
+    second.counts.score - first.counts.score
+    || second.counts.upvotes - first.counts.upvotes
+    || new Date(second.post.published).getTime() - new Date(first.post.published).getTime();
+
+  let pool: PostView[] = [];
+  const poolIds = new Set<number>();
+  const crossPostOwners = new Set<string>();
+
+  const absorb = (posts: PostView[]) => {
+    let grew = false;
+    posts.forEach((post) => {
+      if (poolIds.has(post.post.id)) return;
+      if (options.collapseCrossPosts) {
+        const key = crossPostKey(post);
+        // `pool` stays sorted, so the copy met first — the highest scoring one — is the copy that
+        // keeps the slot; the rest are recorded so they cannot come back on a later page.
+        if (key && crossPostOwners.has(key)) {
+          poolIds.add(post.post.id);
+          return;
+        }
+        if (key) crossPostOwners.add(key);
+      }
+      poolIds.add(post.post.id);
+      pool = [...pool, post];
+      grew = true;
+    });
+    if (grew) pool.sort(rankFirst);
+  };
+
+  let cursor: string | null = null;
+  let pageNumber = 1;
+  let pagesScanned = 0;
+  let capped = false;
+
+  while (pagesScanned < maxPages) {
+    const params = new URLSearchParams({ type_: "All", sort, limit: String(WEEKLY_TOP_PAGE_SIZE) });
+    const known = cursorSupport.get(instance);
+    const useCursor = Boolean(cursor) && known !== false;
+    // A chart is a record, not a feed: a post the reader has already opened still belongs in it.
+    if (options.token) {
+      params.set("show_read", "true");
+      params.set("auth", options.token);
+    }
+    if (useCursor) params.set("page_cursor", cursor!);
+    else params.set("page", String(pageNumber));
+
+    const data = await request<{ posts?: PostView[]; next_page?: string | null }>(instance, `/post/list?${params}`, { token: options.token });
+    pagesScanned += 1;
+
+    const batch = data.posts ?? [];
+    const floor = batch.reduce((lowest, post) => Math.min(lowest, post.counts.score), Number.POSITIVE_INFINITY);
+    absorb(batch.filter((post) => isWithinWeek(post.post.published, week)));
+    options.onProgress?.(pool.slice(0, size));
+
+    // Proven complete: nothing further down the ranking can beat the tenth post already in hand.
+    if (pool.length >= size && pool[size - 1].counts.score >= floor) break;
+
+    const nextCursor = typeof data.next_page === "string" && data.next_page ? data.next_page : null;
+    if (nextCursor) {
+      cursorSupport.set(instance, true);
+      cursor = nextCursor;
+    } else {
+      // Same probe as `listPosts`: a first page with no cursor means this instance pages by number.
+      if (known === undefined && !useCursor) cursorSupport.set(instance, false);
+      cursor = null;
+      pageNumber += 1;
+    }
+
+    // The ranking ran out, so the walk has seen every post in its window: nothing was missed.
+    if (!nextCursor && batch.length < WEEKLY_TOP_PAGE_SIZE) break;
+    if (pagesScanned === maxPages) capped = true;
+  }
+
+  return { posts: pool.slice(0, size), pagesScanned, capped };
 }
 
 export const USER_POSTS_PAGE_SIZE = 20;
