@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDown, ArrowUp, Bell, Bookmark, CircleUserRound, Home, Info, LogOut, MoonStar, Settings, SquarePen, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bell, Bookmark, CircleUserRound, Home, Info, LogOut, MoonStar, Settings, SquarePen, Trophy, X } from "lucide-react";
 import type { ViewName } from "../types";
 import { BrandMark } from "./BrandMark";
 import { useAppStore } from "../store/useAppStore";
 
 const items: Array<{ view: ViewName; label: string; icon: typeof Home; requiresAuth?: boolean; authMessage?: string }> = [
   { view: "feed", label: "Feed", icon: Home },
+  // Read-only and instance-wide, so it needs no token: the chart is the same for a guest.
+  { view: "weekly", label: "Weekly Top 10", icon: Trophy },
   { view: "publish", label: "Publish post", icon: SquarePen, requiresAuth: true, authMessage: "Sign in to publish a post." },
   { view: "notifications", label: "Notifications", icon: Bell, requiresAuth: true },
   { view: "saved", label: "Saved", icon: Bookmark, requiresAuth: true },

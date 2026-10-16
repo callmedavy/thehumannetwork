@@ -5,6 +5,7 @@ import { LoginScreen } from "./components/LoginScreen";
 import { FeedScreen } from "./components/FeedScreen";
 import { SavedView } from "./components/SavedView";
 import { VoteHistoryView } from "./components/VoteHistoryView";
+import { WeeklyTopView } from "./components/WeeklyTopView";
 import { UtilityView } from "./components/UtilityView";
 import { FilterSheet } from "./components/FilterSheet";
 import { MenuDrawer } from "./components/MenuDrawer";
@@ -51,6 +52,7 @@ export default function App() {
       {!instance ? (authMode === "home" ? <HomeScreen onGetStarted={() => useAppStore.getState().browse("lemmy.world")} onLogin={() => setAuthMode("login")} /> : <LoginScreen onBack={() => setAuthMode("home")} />) : (
         <>
           {view === "feed" && <FeedScreen onOpenPost={setSelectedPost} votedPostId={votedPostId} />}
+          {view === "weekly" && <WeeklyTopView onOpenPost={setSelectedPost} />}
           {view === "publish" && <PublishPostView onPublished={setSelectedPost} />}
           {view === "notifications" && <NotificationsView onOpenPost={setSelectedPost} />}
           {view === "saved" && <SavedView onOpenPost={setSelectedPost} />}
